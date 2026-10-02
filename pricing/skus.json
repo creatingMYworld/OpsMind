@@ -1,0 +1,52 @@
+{
+  "_source": "Google Cloud public list prices, verified against cloud.google.com/run/pricing and cloud.google.com/products/observability/pricing on 2026-10-02.",
+  "_note": "List prices only. Free-tier allotments are applied by engine/cost.py before charging. Prices are USD. Tier-1 regions (us-central1, asia-south1 and other standard regions) share these rates.",
+  "currency": "USD",
+  "verifiedOn": "2026-10-02",
+  "cloudRun": {
+    "requestBased": {
+      "cpuPerVcpuSecond": 0.000024,
+      "memoryPerGibSecond": 0.0000025,
+      "perMillionRequests": 0.40,
+      "freeTier": {
+        "vcpuSecondsPerMonth": 180000,
+        "gibSecondsPerMonth": 360000,
+        "requestsPerMonth": 2000000
+      }
+    },
+    "instanceBased": {
+      "cpuPerVcpuSecond": 0.000018,
+      "memoryPerGibSecond": 0.000002,
+      "perMillionRequests": 0.0,
+      "freeTier": {
+        "vcpuSecondsPerMonth": 240000,
+        "gibSecondsPerMonth": 450000,
+        "requestsPerMonth": 0
+      }
+    }
+  },
+  "cloudLogging": {
+    "ingestionPerGib": 0.50,
+    "retentionPerGibPerMonthBeyond30Days": 0.01,
+    "freeTier": {
+      "gibPerProjectPerMonth": 50,
+      "includedRetentionDays": 30
+    },
+    "queryingCost": 0.0
+  },
+  "cloudMonitoring": {
+    "googleCloudSystemMetrics": 0.0,
+    "_chargeableNote": "Custom metrics, external metrics and USER-DEFINED log-based metrics are chargeable by bytes ingested; the first 150 MiB per billing account per month is free. Google Cloud system metrics are non-chargeable and do not count toward the allotment.",
+    "freeTier": {
+      "chargeableMetricMibPerBillingAccountPerMonth": 150
+    }
+  },
+  "vertexAi": {
+    "gemini25Flash": {
+      "inputPerMillionTokens": 0.30,
+      "outputPerMillionTokens": 2.50,
+      "cachedInputPerMillionTokens": 0.03
+    }
+  },
+  "indicativeInrPerUsd": 83.0
+}

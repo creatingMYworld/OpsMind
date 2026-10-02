@@ -1,0 +1,402 @@
+"""Incident lifecycle: breach -> incident -> timeline -> evidence -> impact.
+
+An incident is a first-class object, not a red banner. Three design decisions
+matter here:
+
+1. ONE INCIDENT PER SCOPE, MANY RULES. A cascade trips the 5xx rule and the
+   latency rule on the same service within seconds. Creating two incidents
+   would be technically true and operationally useless, so rules attach to the
+   existing incident for their scope and the timeline records when each one
+   joined.
+
+2. ROOT CAUSE FROM DEPENDENCY CITATIONS, NOT GUESSWORK. When orders fails, its
+   error logs carry `dependency: cognikart-payments`. Counting those citations
+   across the incident window identifies the suspected root cause
+   deterministically -- no heuristics about service naming, no ML.
+
+3. EVIDENCE IS BUILT BY THIS MODULE, NOT BY THE AI. The bundle below is
+   assembled from the store with plain arithmetic. The Gemini explainer
+   receives it and may only narrate it (see ai/explain.py). This is the
+   boundary that keeps the AI from inventing numbers.
+"""
+import time
+import uuid
+from collections import Counter
+from typing import Any, Dict, List, Optional
+
+from ..config import settings
+from . import cost as cost_engine
+from .rules import Breach, SCOPE_GLOBAL
+
+STATUS_OPEN = "OPEN"
+STATUS_RESOLVED = "RESOLVED"
+
+_SEVERITY_ORDER = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+
+
+class Incident:
+    def __init__(self, breach: Breach) -> None:
+        self.id = "inc_" + uuid.uuid4().hex[:10]
+        self.scopeKey = breach.scopeKey
+        self.isGlobal = breach.scopeKey == "__all__"
+        self.service = None if self.isGlobal else breach.scopeKey
+        self.category = breach.rule.category
+        self.severity = breach.rule.severity
+        self.status = STATUS_OPEN
+        self.startedAt = time.time()
+        self.lastSeenAt = self.startedAt
+        self.resolvedAt: Optional[float] = None
+        self.triggers: Dict[str, Dict[str, Any]] = {}
+        self.timeline: List[Dict[str, Any]] = []
+        self.peakObserved: Dict[str, float] = {}
+        self.clearStreak = 0
+        self._add_trigger(breach, first=True)
+
+    # --- lifecycle ---------------------------------------------------------
+    def _add_trigger(self, breach: Breach, first: bool = False) -> None:
+        rid = breach.rule.id
+        known = rid in self.triggers
+        self.triggers[rid] = {
+            "ruleId": rid,
+            "ruleName": breach.rule.name,
+            "metric": breach.rule.metric,
+            "comparator": breach.rule.comparator,
+            "threshold": breach.threshold,
+            "unit": breach.rule.unit,
+            "observed": breach.observed,
+            "source": breach.rule.source,
+            "category": breach.rule.category,
+            "firstSeenAt": self.triggers.get(rid, {}).get("firstSeenAt", time.time()),
+            "lastSeenAt": time.time(),
+            "evidence": breach.evidence,
+        }
+        prev = self.peakObserved.get(breach.rule.metric)
+        worse = (prev is None or
+                 (breach.rule.comparator == "gt" and breach.observed > prev) or
+                 (breach.rule.comparator == "lt" and breach.observed < prev))
+        if worse:
+            self.peakObserved[breach.rule.metric] = breach.observed
+
+        if _SEVERITY_ORDER.get(breach.rule.severity, 0) > _SEVERITY_ORDER.get(self.severity, 0):
+            self.severity = breach.rule.severity
+
+        if not known:
+            self.add_event(
+                "detected" if first else "escalated",
+                "%s breached: %s %s %s%s (observed %s%s)" % (
+                    breach.rule.name, breach.rule.metric,
+                    ">" if breach.rule.comparator == "gt" else "<",
+                    _fmt(breach.threshold), breach.rule.unit,
+                    _fmt(breach.observed), breach.rule.unit,
+                ),
+                source=breach.rule.source,
+            )
+
+    def add_event(self, kind: str, text: str, source: str = "platform") -> None:
+        self.timeline.append({
+            "ts": time.time(), "kind": kind, "text": text, "source": source,
+        })
+        # Bounded: an incident left open for hours must not grow without limit.
+        if len(self.timeline) > 200:
+            self.timeline = self.timeline[-200:]
+
+    def touch(self, breach: Breach) -> None:
+        self.lastSeenAt = time.time()
+        self.clearStreak = 0
+        self._add_trigger(breach)
+
+    def mark_clear(self, required: int) -> bool:
+        """Returns True when the incident has just resolved."""
+        if self.status != STATUS_OPEN:
+            return False
+        self.clearStreak += 1
+        if self.clearStreak >= required:
+            self.status = STATUS_RESOLVED
+            self.resolvedAt = time.time()
+            self.add_event(
+                "resolved",
+                "all breached conditions clear for %d consecutive evaluations"
+                % required,
+            )
+            return True
+        return False
+
+    # --- serialisation -----------------------------------------------------
+    def to_dict(self, store=None) -> Dict[str, Any]:
+        duration = (self.resolvedAt or time.time()) - self.startedAt
+        d = {
+            "id": self.id,
+            "status": self.status,
+            "severity": self.severity,
+            "category": self.category,
+            "scope": self.scopeKey,
+            "service": self.service,
+            "isGlobal": self.isGlobal,
+            "startedAt": self.startedAt,
+            "lastSeenAt": self.lastSeenAt,
+            "resolvedAt": self.resolvedAt,
+            "durationS": round(duration, 1),
+            "title": self.title(),
+            "triggers": list(self.triggers.values()),
+            "triggerCount": len(self.triggers),
+            "peakObserved": {k: round(v, 4) for k, v in self.peakObserved.items()},
+            "timeline": self.timeline,
+        }
+        if store is not None:
+            d["impact"] = self.impact(store)
+        return d
+
+    def title(self) -> str:
+        names = [t["ruleName"] for t in self.triggers.values()]
+        where = self.service or "platform-wide"
+        if len(names) == 1:
+            return "%s on %s" % (names[0], where)
+        return "%s and %d more condition(s) on %s" % (names[0], len(names) - 1, where)
+
+    def impact(self, store) -> Dict[str, Any]:
+        """Cost and business impact. Both modeled, both labelled."""
+        cost = cost_engine.incident_delta(store, self.startedAt)
+        window = max(1, int((time.time() - self.startedAt) / 60.0) + 1)
+        buckets = store.series(window_minutes=min(window, settings.minute_buckets))
+        since = [b for b in buckets if b["ts"] >= self.startedAt - 60]
+        revenue_failed = round(sum(b.get("revenueFailedInr", 0.0) for b in since), 2)
+        confirmed = sum(b.get("checkoutsConfirmed", 0) for b in since)
+        failed = sum(b.get("checkoutsFailed", 0) for b in since)
+        settled = confirmed + failed
+        return {
+            "cost": cost,
+            "business": {
+                "kind": "measured",
+                "revenueAtRiskInr": revenue_failed,
+                "failedCheckouts": failed,
+                "confirmedCheckouts": confirmed,
+                "checkoutSuccessRatePct": round(100.0 * confirmed / settled, 1)
+                if settled else None,
+                "basis": "Sum of cartValueInr on checkout.failed events since "
+                         "the incident began. Measured from logs, not modeled.",
+            },
+        }
+
+
+def _fmt(v: float) -> str:
+    if v is None:
+        return "?"
+    if abs(v) < 1 and v != 0:
+        return "%.3f" % v
+    if abs(v - round(v)) < 1e-9:
+        return "%d" % round(v)
+    return "%.2f" % v
+
+
+class IncidentManager:
+    def __init__(self) -> None:
+        self._open: Dict[str, Incident] = {}        # scopeKey -> incident
+        self._all: Dict[str, Incident] = {}         # id -> incident
+        self._history: List[str] = []
+
+    def ingest(self, breaches: List[Breach], clear_required: int = 3) -> Dict[str, Any]:
+        seen_scopes = set()
+        opened: List[str] = []
+        for b in breaches:
+            scope = b.scopeKey if b.rule.scope == SCOPE_GLOBAL else b.scopeKey
+            # Global rules of different categories should not merge into one
+            # incident -- a cost anomaly and a checkout-rate collapse are
+            # different problems even though both are platform-wide.
+            if b.rule.scope == SCOPE_GLOBAL:
+                scope = "__all__::%s" % b.rule.category
+            seen_scopes.add(scope)
+            inc = self._open.get(scope)
+            if inc is None:
+                inc = Incident(b)
+                inc.scopeKey = scope
+                inc.isGlobal = scope.startswith("__all__")
+                inc.service = None if inc.isGlobal else b.scopeKey
+                self._open[scope] = inc
+                self._all[inc.id] = inc
+                self._history.append(inc.id)
+                if len(self._history) > 300:
+                    old = self._history.pop(0)
+                    self._all.pop(old, None)
+                opened.append(inc.id)
+            else:
+                inc.touch(b)
+
+        resolved: List[str] = []
+        for scope, inc in list(self._open.items()):
+            if scope in seen_scopes:
+                continue
+            if inc.mark_clear(clear_required):
+                resolved.append(inc.id)
+                self._open.pop(scope, None)
+
+        return {"opened": opened, "resolved": resolved,
+                "openCount": len(self._open)}
+
+    # --- queries -----------------------------------------------------------
+    def open_incidents(self) -> List[Incident]:
+        return sorted(self._open.values(), key=lambda i: i.startedAt, reverse=True)
+
+    def all_incidents(self, limit: int = 50) -> List[Incident]:
+        items = [self._all[i] for i in reversed(self._history) if i in self._all]
+        return items[:limit]
+
+    def get(self, incident_id: str) -> Optional[Incident]:
+        return self._all.get(incident_id)
+
+    def correlate(self, incident: Incident, store,
+                  window_s: float = 180.0) -> Dict[str, Any]:
+        """Relate concurrent incidents and name a suspected root cause.
+
+        Root cause is whichever service is most often cited as the FAILING
+        DEPENDENCY in error logs during the incident window. In the cascade,
+        orders' errors cite cognikart-payments, so payments is named -- and
+        orders is correctly described as downstream rather than at fault.
+        """
+        related = [
+            i for i in self._all.values()
+            if i.id != incident.id
+            and abs(i.startedAt - incident.startedAt) <= window_s
+        ]
+        page = store.logs(limit=1500, min_severity="WARNING",
+                          since=incident.startedAt - 30)
+        citations: Counter = Counter()
+        failing_services: Counter = Counter()
+        for e in page["entries"]:
+            if e.get("dependency") and (e.get("errorCode") or
+                                        (e.get("httpStatus") or 0) >= 500):
+                citations[e["dependency"]] += 1
+            if (e.get("httpStatus") or 0) >= 500:
+                failing_services[e.get("service")] += 1
+
+        suspected = citations.most_common(1)[0][0] if citations else None
+        if not suspected and failing_services:
+            suspected = failing_services.most_common(1)[0][0]
+
+        return {
+            "suspectedRootCauseService": suspected,
+            "rootCauseBasis": (
+                "most frequently cited failing dependency in error logs "
+                "during the incident window (%d citations)"
+                % citations[suspected] if suspected and citations[suspected]
+                else "most 5xx responses during the incident window"
+            ) if suspected else None,
+            "dependencyCitations": dict(citations.most_common(5)),
+            "errorsByService": dict(failing_services.most_common(5)),
+            "relatedIncidentIds": [i.id for i in related],
+            "relatedIncidents": [
+                {"id": i.id, "title": i.title(), "service": i.service,
+                 "status": i.status, "startedAt": i.startedAt,
+                 "category": i.category}
+                for i in sorted(related, key=lambda x: x.startedAt)
+            ],
+            "isLikelyDownstream": bool(
+                suspected and incident.service and suspected != incident.service),
+        }
+
+    def evidence(self, incident: Incident, store) -> Dict[str, Any]:
+        """The deterministic evidence bundle.
+
+        This is the ONLY thing the AI explainer ever sees. Every number in it
+        is computed here from the store; the model adds no data.
+        """
+        now = time.time()
+        inc_minutes = max(1, int((now - incident.startedAt) / 60.0) + 1)
+        start_minute = int(incident.startedAt // 60)
+
+        all_buckets = store.series(window_minutes=settings.minute_buckets)
+        before = [b for b in all_buckets
+                  if start_minute - 15 <= b["minute"] < start_minute]
+        during = [b for b in all_buckets if b["minute"] >= start_minute]
+
+        def agg(rows: List[Dict[str, Any]], key: str) -> float:
+            return sum(r.get(key, 0) or 0 for r in rows)
+
+        def avg(rows: List[Dict[str, Any]], key: str) -> Optional[float]:
+            vals = [r.get(key) for r in rows if r.get(key) is not None]
+            return round(sum(vals) / len(vals), 2) if vals else None
+
+        before_min = max(len(before), 1)
+        during_min = max(len(during), 1)
+
+        correlation = self.correlate(incident, store)
+        groups = store.error_groups(window_minutes=inc_minutes + 2, limit=6)
+        if incident.service:
+            scoped = [g for g in groups if g["service"] == incident.service]
+            groups = scoped or groups
+
+        sample_trace: List[Dict[str, Any]] = []
+        for g in groups:
+            if g.get("sampleTraces"):
+                sample_trace = store.trace(g["sampleTraces"][0].split("/")[-1])
+                if sample_trace:
+                    break
+
+        return {
+            "incidentId": incident.id,
+            "title": incident.title(),
+            "status": incident.status,
+            "severity": incident.severity,
+            "category": incident.category,
+            "affectedScope": incident.service or "platform-wide",
+            "detectedAt": incident.startedAt,
+            "incidentMinutes": round((now - incident.startedAt) / 60.0, 1),
+            "triggers": list(incident.triggers.values()),
+            "timeline": incident.timeline,
+            "correlation": correlation,
+            "metricsDelta": {
+                "requestsPerMin": {
+                    "before": round(agg(before, "requests") / before_min, 2),
+                    "during": round(agg(during, "requests") / during_min, 2),
+                },
+                "errors5xxPerMin": {
+                    "before": round(agg(before, "errors5xx") / before_min, 2),
+                    "during": round(agg(during, "errors5xx") / during_min, 2),
+                },
+                "p95LatencyMs": {
+                    "before": avg(before, "p95LatencyMs"),
+                    "during": avg(during, "p95LatencyMs"),
+                },
+                "logMibPerMin": {
+                    "before": round(agg(before, "logBytes") / before_min / 1048576.0, 4),
+                    "during": round(agg(during, "logBytes") / during_min / 1048576.0, 4),
+                },
+                "retriesPerMin": {
+                    "before": round(agg(before, "retries") / before_min, 2),
+                    "during": round(agg(during, "retries") / during_min, 2),
+                },
+                "paymentAttemptsPerMin": {
+                    "before": round(agg(before, "paymentAttempts") / before_min, 2),
+                    "during": round(agg(during, "paymentAttempts") / during_min, 2),
+                },
+                "instanceCountMax": {
+                    "before": max([r.get("instanceCount", 0) for r in before] or [0]),
+                    "during": max([r.get("instanceCount", 0) for r in during] or [0]),
+                },
+            },
+            "topErrors": [
+                {"errorCode": g["errorCode"], "errorClass": g["errorClass"],
+                 "service": g["service"], "route": g["route"],
+                 "count": g["count"], "pattern": g["pattern"]}
+                for g in groups
+            ],
+            "impact": incident.impact(store),
+            "sampleTrace": [
+                {"service": e.get("service"), "event": e.get("event"),
+                 "severity": e.get("severity"), "route": e.get("route"),
+                 "httpStatus": e.get("httpStatus"), "latencyMs": e.get("latencyMs"),
+                 "errorCode": e.get("errorCode"), "retryCount": e.get("retryCount"),
+                 "dependency": e.get("dependency"), "message": e.get("message")}
+                for e in sample_trace[:14]
+            ],
+            "servicesObserved": store.service_summary(window_minutes=inc_minutes + 1),
+            "provenance": {
+                "dataSource": settings.data_source,
+                "note": "All figures computed deterministically from telemetry "
+                        "by engine/incidents.py. Cost figures are modeled from "
+                        "published list prices; business figures are measured "
+                        "from logs.",
+            },
+        }
+
+
+manager = IncidentManager()

@@ -1,0 +1,140 @@
+"""OpsMind platform configuration.
+
+DATA_SOURCE is the single most important switch:
+
+  local  -- CogniKart services POST their log entries straight to
+            /internal/ingest. No GCP project, no credentials, no gcloud.
+            This is the development and fallback path.
+  gcp    -- the platform reads the Cloud Logging API and the Cloud Monitoring
+            API using Application Default Credentials from the Cloud Run
+            runtime service account. This is the real submission architecture.
+
+Both modes share the same normalizer, the same engines, the same API contract
+and the same UI. Only the collector swaps. Every API response carries the
+active source so the dashboard can label its provenance honestly.
+"""
+import json
+import os
+import re
+from typing import Dict, List, Optional
+
+
+def _env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(_env(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(_env(name, str(default)))
+    except ValueError:
+        return default
+
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+class Settings:
+    def __init__(self) -> None:
+        self.data_source: str = _env("DATA_SOURCE", "local").lower()
+        if self.data_source not in ("local", "gcp"):
+            self.data_source = "local"
+
+        self.project_id: str = (
+            _env("GOOGLE_CLOUD_PROJECT") or _env("GCP_PROJECT") or ""
+        )
+        self.region: str = _env("GCP_REGION", "asia-south1")
+
+        # Cloud Run service names the platform observes. CogniKart's four
+        # services plus the platform itself -- the platform monitoring its own
+        # log volume is both a demo beat and a billing safety net.
+        # Accept either separator. gcloud's --set-env-vars uses comma as its
+        # own delimiter, so a comma-separated list has to be escaped or passed
+        # with semicolons; supporting both removes a sharp edge from deploys.
+        self.watched_services: List[str] = [
+            s.strip() for s in re.split(
+                r"[,;]",
+                _env(
+                    "WATCHED_SERVICES",
+                    "cognikart-gateway,cognikart-catalog,cognikart-orders,"
+                    "cognikart-payments,opsmind-portal",
+                ),
+            ) if s.strip()
+        ]
+
+        # Retention in the platform's own memory. 5000 entries at ~600 bytes
+        # is a few MB -- bounded, no database, survives nothing. Deliberate:
+        # Cloud Logging is the durable store, this is a working set.
+        self.log_buffer_size: int = _env_int("LOG_BUFFER_SIZE", 5000)
+        self.minute_buckets: int = _env_int("MINUTE_BUCKETS", 180)
+
+        # Poll cadences. See docs/ARCHITECTURE.md "three latency tiers".
+        self.logs_poll_interval_s: float = _env_float("LOGS_POLL_INTERVAL_S", 4.0)
+        self.metrics_poll_interval_s: float = _env_float("METRICS_POLL_INTERVAL_S", 60.0)
+        self.rules_eval_interval_s: float = _env_float("RULES_EVAL_INTERVAL_S", 5.0)
+
+        # Cloud Run per-service provisioning, used by the cost engine to turn
+        # observed usage into money, and by the optimization engine to spot
+        # over-provisioning. Must match what you actually deploy -- deploy.sh
+        # and this table are kept in step on purpose.
+        self.service_shape: Dict[str, Dict[str, float]] = {
+            "cognikart-gateway": {"vcpu": 1.0, "memoryGib": 0.5, "maxInstances": 5},
+            "cognikart-catalog": {"vcpu": 1.0, "memoryGib": 1.0, "maxInstances": 5},
+            "cognikart-orders": {"vcpu": 1.0, "memoryGib": 0.5, "maxInstances": 5},
+            "cognikart-payments": {"vcpu": 1.0, "memoryGib": 0.5, "maxInstances": 3},
+            "opsmind-portal": {"vcpu": 1.0, "memoryGib": 0.5, "maxInstances": 2},
+        }
+        self.billing_model: str = _env("CLOUD_RUN_BILLING_MODEL", "requestBased")
+
+        # Gemini incident explanation. Entirely optional: when disabled or
+        # unavailable the deterministic narrative is used instead.
+        self.ai_enabled: bool = _env("AI_ENABLED", "false").lower() in ("1", "true", "yes")
+        self.ai_model: str = _env("AI_MODEL", "gemini-2.5-flash")
+        self.ai_location: str = _env("AI_LOCATION", "global")
+        self.ai_timeout_s: float = _env_float("AI_TIMEOUT_S", 12.0)
+
+        # Optional shared-secret gate for the dashboard. The platform holds
+        # read access to your logs, so do not leave it open on a public URL
+        # without this set. See docs/DEPLOY.md step 8.
+        self.dashboard_token: str = _env("DASHBOARD_TOKEN", "")
+
+        self.pricing: Dict = self._load_pricing()
+        self.inr_per_usd: float = float(
+            self.pricing.get("indicativeInrPerUsd", 83.0)
+        )
+
+    def _load_pricing(self) -> Dict:
+        with open(os.path.join(_HERE, "pricing", "skus.json")) as fh:
+            return json.load(fh)
+
+    @property
+    def run_prices(self) -> Dict:
+        return self.pricing["cloudRun"][self.billing_model]
+
+    def shape(self, service: str) -> Dict[str, float]:
+        return self.service_shape.get(
+            service, {"vcpu": 1.0, "memoryGib": 0.5, "maxInstances": 5}
+        )
+
+    def as_dict(self) -> Dict[str, object]:
+        return {
+            "dataSource": self.data_source,
+            "projectId": self.project_id or None,
+            "region": self.region,
+            "watchedServices": self.watched_services,
+            "billingModel": self.billing_model,
+            "aiEnabled": self.ai_enabled,
+            "aiModel": self.ai_model if self.ai_enabled else None,
+            "pricingVerifiedOn": self.pricing.get("verifiedOn"),
+            "logsPollIntervalS": self.logs_poll_interval_s,
+            "metricsPollIntervalS": self.metrics_poll_interval_s,
+        }
+
+
+settings = Settings()

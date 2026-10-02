@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpsMind</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+
+  <aside class="rail">
+    <div class="brand">
+      <h1>OpsMind</h1>
+      <div class="sub">observing <strong>CogniKart</strong></div>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-view="overview" class="active"><span class="ico">◉</span> Overview</button>
+      <button data-view="logs"><span class="ico">≡</span> Live Logs</button>
+      <button data-view="errors"><span class="ico">⚠</span> Errors</button>
+      <button data-view="resources"><span class="ico">▤</span> Resources</button>
+      <button data-view="cost"><span class="ico">₹</span> Cost &amp; Optimization</button>
+      <button data-view="alerts"><span class="ico">⏱</span> Alerts</button>
+      <button data-view="incidents"><span class="ico">✸</span> Incidents <span class="badge" id="incBadge" style="display:none">0</span></button>
+    </nav>
+    <div class="rail-foot">
+      <div id="srcBadge" class="pill muted" style="margin-bottom:6px"><span class="dot"></span> connecting…</div>
+      <div id="railMeta">—</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <span id="healthPill" class="pill muted"><span class="dot"></span> —</span>
+      <span class="faint" style="font-size:12px">window</span>
+      <select id="windowSel">
+        <option value="5">5 min</option>
+        <option value="15" selected>15 min</option>
+        <option value="60">1 hour</option>
+        <option value="180">3 hours</option>
+      </select>
+      <span class="spacer"></span>
+      <span class="faint" style="font-size:12px">demo</span>
+      <select id="scenarioSel" style="min-width:210px"><option>loading…</option></select>
+      <button class="btn primary" id="applyScenario">Inject</button>
+      <button class="btn danger" id="recoverBtn">Recover</button>
+      <button class="btn" id="themeBtn" title="Toggle theme">◐</button>
+    </header>
+
+    <!-- OVERVIEW -->
+    <section class="view active" id="view-overview">
+      <h2>Overview</h2>
+      <div class="lede">System health, traffic, business outcome and modeled cloud spend for CogniKart.</div>
+      <div class="grid g4" id="heroTiles"></div>
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card">
+          <h3>Traffic &amp; errors <span class="tier live">live</span></h3>
+          <div class="hint">Requests by outcome per minute, with p95 latency overlaid.</div>
+          <div class="chart-wrap"><canvas id="chTraffic"></canvas></div>
+        </div>
+        <div class="card">
+          <h3>Modeled cloud spend <span class="tier live">live · modeled</span></h3>
+          <div class="hint">Measured usage × Google Cloud published list prices. Not a billed amount.</div>
+          <div class="chart-wrap"><canvas id="chCost"></canvas></div>
+        </div>
+      </div>
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card">
+          <h3>Service health</h3>
+          <div class="hint">Click a service to inspect its resources.</div>
+          <div style="overflow-x:auto"><table id="svcTable"></table></div>
+        </div>
+        <div class="card">
+          <h3>Checkout funnel</h3>
+          <div class="hint">Derived from the log stream — the business view of the same data.</div>
+          <div id="funnelBox"></div>
+        </div>
+      </div>
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card"><h3>Active incidents</h3><div id="ovIncidents"></div></div>
+        <div class="card"><h3>Top cost-saving actions</h3><div id="ovRecs"></div></div>
+      </div>
+    </section>
+
+    <!-- LOGS -->
+    <section class="view" id="view-logs">
+      <h2>Live Logs <span class="tier live">live · 1–5 s</span></h2>
+      <div class="lede">Centralised, structured logs from all four CogniKart services. Click any row for the full entry and its trace across services.</div>
+      <div class="logbar">
+        <select id="logSev"><option value="">all severities</option><option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select>
+        <select id="logSvc"><option value="">all services</option></select>
+        <input type="text" id="logQ" placeholder="search message, event, error code…" style="min-width:260px">
+        <button class="btn" id="logPause">⏸ Pause</button>
+        <button class="btn" id="logClear">Clear</button>
+        <span class="faint mono" id="logCount" style="margin-left:auto"></span>
+      </div>
+      <div class="card" style="padding:10px 12px;margin-bottom:12px">
+        <div class="hint" style="margin:0 0 6px">Log ingestion volume (MiB/min) — the fastest-moving cost driver in this architecture</div>
+        <div class="chart-wrap xs"><canvas id="chLogVol"></canvas></div>
+      </div>
+      <div class="logtable"><table><tbody id="logBody"></tbody></table></div>
+    </section>
+
+    <!-- ERRORS -->
+    <section class="view" id="view-errors">
+      <h2>Error Intelligence</h2>
+      <div class="lede">Deterministic grouping by service + error code + exception class + route + normalised message. No ML, no guessing — identical inputs always produce identical groups.</div>
+      <div class="grid g3" id="errTiles"></div>
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card"><h3>Errors over time</h3><div class="hint">5xx are server faults; 4xx are client mistakes. The platform never conflates them.</div><div class="chart-wrap"><canvas id="chErrors"></canvas></div></div>
+        <div class="card"><h3>Server vs client</h3><div class="hint">A bad product id is not a service failure.</div><div class="chart-wrap"><canvas id="chErrSplit"></canvas></div></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h3>Error groups</h3><div class="hint">Click a group to see samples and jump to its logs.</div>
+        <div style="overflow-x:auto"><table id="errTable"></table></div>
+      </div>
+    </section>
+
+    <!-- RESOURCES -->
+    <section class="view" id="view-resources">
+      <h2>Resource Monitoring</h2>
+      <div class="lede">
+        Two tiers, deliberately distinguished: <span class="tier live">live</span> comes from service heartbeats in seconds;
+        <span class="tier near">near real time</span> comes from Cloud Monitoring and lags by minutes. Both are real measurements.
+      </div>
+      <div class="grid g4" id="resCards"></div>
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card"><h3>CPU per service <span class="tier live">live</span></h3><div class="hint">Process CPU from heartbeats.</div><div class="chart-wrap"><canvas id="chCpu"></canvas></div></div>
+        <div class="card"><h3>Memory vs provisioned <span class="tier live">live</span></h3><div class="hint">Resident memory against the container limit — the basis for right-sizing.</div><div class="chart-wrap"><canvas id="chMem"></canvas></div></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h3>Cloud Monitoring <span class="tier near">near real time</span></h3>
+        <div class="hint">Google Cloud system metrics — non-chargeable to read, sampled ~60s with a few minutes of visibility delay.</div>
+        <div id="platformMetrics"></div>
+      </div>
+    </section>
+
+    <!-- COST -->
+    <section class="view" id="view-cost">
+      <h2>Cost &amp; Optimization</h2>
+      <div class="lede">Live cost is <strong>modeled</strong> from measured usage × published list prices. Billed cost is a separate, slower tier and is labelled as such.</div>
+      <div class="grid g4" id="costTiles"></div>
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card"><h3>Spend rate by driver</h3><div class="hint">Where the money actually goes.</div><div class="chart-wrap"><canvas id="chCostDriver"></canvas></div></div>
+        <div class="card"><h3>Spend by service</h3><div class="hint">Per-service modeled rate, USD/hour.</div><div class="chart-wrap"><canvas id="chCostSvc"></canvas></div></div>
+      </div>
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card">
+          <h3>Free-tier position</h3>
+          <div class="hint" id="ftHint">Current rate projected to a full month. This is the "will we actually be billed?" panel.</div>
+          <div id="freeTier"></div>
+        </div>
+        <div class="card">
+          <h3>Billed cost <span class="tier auth">authoritative</span></h3>
+          <div class="hint">The real, invoiced number — and why it is not on screen yet.</div>
+          <div id="billed"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h3>Optimization Center</h3>
+        <div class="hint" id="recHint">Every recommendation carries evidence, the observed metric, a confidence level and a concrete next action. A saving figure appears only when it can be calculated from published pricing.</div>
+        <div id="recs"></div>
+      </div>
+    </section>
+
+    <!-- ALERTS -->
+    <section class="view" id="view-alerts">
+      <h2>Alert Thresholds</h2>
+      <div class="lede">Editable thresholds — this is the brief's "set alert thresholds" step, implemented inside the product. Changes take effect on the next evaluation.</div>
+      <div class="card" id="alertSources" style="margin-bottom:14px"></div>
+      <div id="alertList"></div>
+    </section>
+
+    <!-- INCIDENTS -->
+    <section class="view" id="view-incidents">
+      <h2>Incidents</h2>
+      <div class="lede">An alert becomes an incident with a timeline, evidence, a suspected root cause, and <strong>two</strong> impact numbers: cloud cost and revenue at risk.</div>
+      <div id="rootCauseBanner"></div>
+      <div id="incList"></div>
+    </section>
+  </main>
+</div>
+
+<div class="drawer-bg" id="drawerBg"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-head">
+    <div style="flex:1"><div id="drawerTitle" style="font-weight:650"></div><div id="drawerSub" class="faint" style="font-size:12px"></div></div>
+    <button class="btn" id="drawerClose">✕</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

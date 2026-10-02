@@ -1,0 +1,10 @@
+# Everything not excluded here is uploaded to Cloud Build and baked into the
+# image on every deploy.
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.DS_Store
+.git/
+.github/
+*.md
