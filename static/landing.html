@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpsMind</title>
+<meta name="description" content="Cloud log monitoring, resource visibility and cost optimization for Google Cloud. Reads Cloud Logging and Cloud Monitoring directly.">
+<link rel="stylesheet" href="/static/landing.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-in">
+    <a class="logo" href="/"><span class="mark">◈</span>OpsMind</a>
+    <div class="nav-links">
+      <a href="#product">Product</a>
+      <a href="#solutions">Solutions</a>
+      <a href="#cloud">Google Cloud</a>
+      <a href="#about">About</a>
+    </div>
+    <div class="nav-cta">
+      <a class="btn ghost" href="#solutions">How it works</a>
+      <a class="btn primary" href="/app#projects">Start</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow"><span class="dot"></span><span id="liveState">reading Cloud Logging</span></div>
+    <h1>Your logs already know what broke. <em>Nothing joins them up.</em></h1>
+    <p class="sub">
+      OpsMind reads Cloud Logging and Cloud Monitoring directly and turns them into
+      incidents with a named cause, a cost, and the revenue they put at risk —
+      the one question no console answers.
+    </p>
+    <div class="hero-cta">
+      <a class="btn primary lg" href="/app#projects">Start — choose a project</a>
+      <a class="btn ghost lg" href="#solutions">See what it answers</a>
+    </div>
+    <div class="hero-note" id="heroNote">Read-only. OpsMind cannot change anything in your project.</div>
+
+    <div class="figures reveal">
+      <div class="fig"><div class="n" id="figServices">—</div><div class="l">Services watched</div><div class="s" id="figServicesSub">live from this instance</div></div>
+      <div class="fig"><div class="n" id="figEntries">—</div><div class="l">Log entries processed</div><div class="s">since this instance started</div></div>
+      <div class="fig"><div class="n">3</div><div class="l">Latency tiers, labelled</div><div class="s">seconds · minutes · one day</div></div>
+      <div class="fig"><div class="n" id="figRules">7</div><div class="l">Alert thresholds</div><div class="s">editable in the product</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- PRODUCT -->
+<section id="product">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Product</div>
+      <h2>An operations console that reaches a conclusion.</h2>
+      <p>Logs, metrics and cost are already in Google Cloud, on three different screens with three
+         different time axes. OpsMind reads all three and does the joining — deterministically, so
+         the same window always produces the same answer.</p>
+    </div>
+    <div class="cards">
+      <div class="card reveal"><div class="ic">◉</div>
+        <h3>Incidents, not alerts</h3>
+        <p>A threshold crossing becomes an incident with a timeline, the conditions that fired, and
+           a suspected root cause identified from which service error logs actually blame.</p></div>
+      <div class="card reveal"><div class="ic">₹</div>
+        <h3>Cost per incident</h3>
+        <p>Measured usage multiplied by Google's published list prices. Labelled modeled, never
+           presented as billed, and shown beside the real billing tier.</p>
+        <code>+$3.42/hr above baseline · 61% log ingestion</code></div>
+      <div class="card reveal"><div class="ic">≡</div>
+        <h3>One request, four services</h3>
+        <p>Trace propagation across every hop, so "which service caused it" has a provable answer
+           rather than a guess.</p></div>
+      <div class="card reveal"><div class="ic">◈</div>
+        <h3>Patterns and anomalies</h3>
+        <p>Every log line clustered by template, and each series compared against its own baseline —
+           because a fixed threshold cannot tell you what is unusual <em>for this service</em>.</p></div>
+      <div class="card reveal"><div class="ic">⚑</div>
+        <h3>A ranked queue, not a wall</h3>
+        <p>What to do now, why it matters, the first step, and how you will know it worked. Priority
+           is not severity: a resolved critical ranks below a firing warning.</p></div>
+      <div class="card reveal"><div class="ic">◐</div>
+        <h3>Grounded explanations</h3>
+        <p>Optional Gemini narration over an evidence bundle. Every number it emits is checked
+           against that evidence, with a deterministic fallback so a demo cannot break.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- SOLUTIONS -->
+<section id="solutions">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Solutions</div>
+      <h2>Five questions the console leaves open.</h2>
+      <p>Every number below already exists in Google Cloud. None of them are connected to each other,
+         and that gap is the entire product.</p>
+    </div>
+    <div class="pa reveal">
+      <div><div class="q">Today</div><p>An alert fires on the gateway. The gateway is fine — something two hops away is not.</p></div>
+      <div><div class="a">With OpsMind</div><p><strong>Root cause named</strong> from which service error logs cite as the failing dependency, with the count behind it.</p></div>
+      <div><div class="q">Today</div><p>You can see an error rate. You cannot see what the outage is costing while it runs.</p></div>
+      <div><div class="a">With OpsMind</div><p><strong>Cost per hour above baseline</strong>, broken down by driver, with the arithmetic shown.</p></div>
+      <div><div class="q">Today</div><p>Nothing in the console knows a failed checkout was worth anything.</p></div>
+      <div><div class="a">With OpsMind</div><p><strong>Revenue at risk</strong>, measured from the log stream — technical and business impact side by side.</p></div>
+      <div><div class="q">Today</div><p>Billing data is a day behind, so cost cannot react to an incident.</p></div>
+      <div><div class="a">With OpsMind</div><p><strong>Three labelled tiers</strong> — live, near-real-time and billed — so nobody mistakes the stale number for the fresh one.</p></div>
+      <div><div class="q">Today</div><p>Waste has no alert. Nobody is paged for an over-provisioned service.</p></div>
+      <div><div class="a">With OpsMind</div><p><strong>Savings calculated</strong> from published prices, with a copyable command — or labelled an opportunity when it cannot be calculated honestly.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- GOOGLE CLOUD -->
+<section id="cloud">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Built on Google Cloud</div>
+      <h2>Native, read-only, and inexpensive by construction.</h2>
+      <p>OpsMind holds read-only roles and exposes no endpoint that changes anything in your project.
+         Reading Google Cloud system metrics is not chargeable, and querying your own logs is free.</p>
+    </div>
+    <div class="gcp reveal">
+      <div class="svc"><span class="tag">source of truth</span><div class="t">Cloud Logging</div>
+        <div class="d">Structured logs read through the Logging API. No agent, no sidecar.</div></div>
+      <div class="svc"><span class="tag">platform truth</span><div class="t">Cloud Monitoring</div>
+        <div class="d">Cloud Run CPU, memory, instance count and billable time. Non-chargeable to read.</div></div>
+      <div class="svc"><span class="tag">hosting</span><div class="t">Cloud Run</div>
+        <div class="d">Both the portal and the application it watches. Scales to zero.</div></div>
+      <div class="svc"><span class="tag">discovery</span><div class="t">Resource Manager</div>
+        <div class="d">Lists the real projects this installation can see.</div></div>
+      <div class="svc"><span class="tag">pricing</span><div class="t">Cloud Billing Catalog</div>
+        <div class="d">Published list prices, so cost figures have a verifiable source.</div></div>
+      <div class="svc"><span class="tag">optional</span><div class="t">Vertex AI · Gemini</div>
+        <div class="d">Narrates evidence. Never computes it, and never required.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ABOUT -->
+<section id="about">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">About</div>
+      <h2>Built for Cognizant's Google Cloud hackathon, Use Case 2.</h2>
+      <p>A cloud-based log monitoring and visualization solution with a dashboard that tracks
+         resource usage and suggests cost-saving actions. The application it observes —
+         CogniKart, a storefront on Cloud Run — is deployed separately and exists only to
+         produce honest telemetry.</p>
+    </div>
+    <div class="cards two">
+      <div class="card reveal"><div class="ic">✓</div><h3>What we will not do</h3>
+        <p>No invented savings figure. No cost presented as billed when it is modeled. No claim of
+           machine learning where the code is arithmetic. Where a number cannot be derived honestly,
+           the product says so instead of printing one.</p></div>
+      <div class="card reveal"><div class="ic">⌁</div><h3>How failure is demonstrated</h3>
+        <p>Fault injection lives in the application, not here. A monitoring platform that can break
+           the thing it watches is a harder thing to trust — so OpsMind has no write path at all.</p></div>
+    </div>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="cta reveal">
+      <h2>Pick a project and look.</h2>
+      <p>OpsMind lists the Google Cloud projects this installation can see and tells you, per project,
+         whether it can actually read the logs — and the exact command to grant it if not.</p>
+      <a class="btn primary lg" href="/app#projects">Start</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-in">
+    <span>OpsMind · cloud log monitoring and cost optimization</span>
+    <span id="footMeta">Read-only · Cloud Logging &amp; Cloud Monitoring</span>
+  </div>
+</footer>
+
+<script src="/static/landing.js"></script>
+</body>
+</html>

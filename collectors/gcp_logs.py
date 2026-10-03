@@ -33,6 +33,7 @@ _PAGE_SIZE = 500
 class GcpLogCollector:
     def __init__(self) -> None:
         self._client = None
+        self._project: Optional[str] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self.cursor: Optional[datetime.datetime] = None
@@ -44,13 +45,28 @@ class GcpLogCollector:
 
     # --- client ------------------------------------------------------------
     def _ensure_client(self) -> Any:
-        if self._client is None:
+        """Rebuild the client whenever the active project changes.
+
+        The client is bound to a project at construction, so holding one across
+        a project switch would keep reading the project the user just left.
+        """
+        project = settings.active_project or settings.project_id
+        if not project:
+            raise RuntimeError(
+                "GOOGLE_CLOUD_PROJECT is not set; cannot query Cloud Logging")
+        if self._client is None or self._project != project:
             from google.cloud import logging as gcl
-            if not settings.project_id:
-                raise RuntimeError(
-                    "GOOGLE_CLOUD_PROJECT is not set; cannot query Cloud Logging")
-            self._client = gcl.Client(project=settings.project_id)
+            self._client = gcl.Client(project=project)
+            self._project = project
+            self.cursor = None     # a new project starts its own history
         return self._client
+
+    def retarget(self) -> None:
+        """Drop the client and cursor so the next poll picks up the new project."""
+        self._client = None
+        self._project = None
+        self.cursor = None
+        self.last_error = None
 
     # --- filter ------------------------------------------------------------
     def build_filter(self, since: datetime.datetime) -> str:
@@ -80,7 +96,7 @@ class GcpLogCollector:
         from google.cloud.logging import ASCENDING
 
         iterator = client.list_entries(
-            resource_names=["projects/%s" % settings.project_id],
+            resource_names=["projects/%s" % (settings.active_project or settings.project_id)],
             filter_=self.build_filter(since),
             order_by=ASCENDING,
             page_size=_PAGE_SIZE,

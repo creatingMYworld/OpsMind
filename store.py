@@ -510,6 +510,28 @@ class Store:
         with self._lock:
             return [r.to_dict() for r in self._heartbeats.values()]
 
+    def reset(self, reason: str = "") -> Dict[str, Any]:
+        """Empty the working set.
+
+        Called when the active project changes. The buffered entries belong to
+        the project being left, and rendering them under a different project's
+        name would be a lie that is very hard to spot. Cloud Logging holds the
+        real history, so the buffer refills within a poll or two.
+        """
+        with self._lock:
+            dropped = len(self._logs)
+            self._logs.clear()
+            self._buckets.clear()
+            self._groups.clear()
+            self._heartbeats.clear()
+            self._seen_ids.clear()
+            self._seen_set.clear()
+            self.ingested_total = 0
+            self.dropped_duplicates = 0
+            self.last_ingest_ts = 0.0
+            self.last_error = None
+        return {"cleared": dropped, "reason": reason}
+
     def stats(self) -> Dict[str, Any]:
         with self._lock:
             return {

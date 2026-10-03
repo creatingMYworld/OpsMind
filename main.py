@@ -20,14 +20,14 @@ server-side using the Cloud Run runtime service account via Application
 Default Credentials.
 """
 import asyncio
+import hashlib
 import json
 import os
 import time
 from typing import Any, Dict, List, Optional
 
-import httpx
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .collectors import local as local_collector
@@ -35,6 +35,8 @@ from .collectors.evaluator import evaluator
 from .config import settings
 from .engine import cost as cost_engine
 from .engine import kpi as kpi_engine
+from .engine import actions as actions_engine
+from .engine import patterns as patterns_engine
 from .engine import recommend as recommend_engine
 from .engine.incidents import manager as incident_manager
 from .engine.rules import ruleset
@@ -43,11 +45,10 @@ from .store import store
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _STATIC = os.path.join(_HERE, "static")
 
-# CogniKart gateway, used only to proxy demo/chaos controls from the dashboard.
-# This is a demo convenience, not part of the monitoring data path: OpsMind
-# reads telemetry from Google Cloud, never from CogniKart directly.
-COGNIKART_GATEWAY_URL = os.environ.get(
-    "COGNIKART_GATEWAY_URL", "http://127.0.0.1:8080").rstrip("/")
+# OpsMind deliberately has no endpoint that changes anything, anywhere. It
+# holds read-only IAM roles and exposes a read-only API: it observes and
+# advises, and cannot act on -- or break -- the application it watches. Fault
+# injection lives in CogniKart's own Scenario Lab, which is where it belongs.
 
 app = FastAPI(
     title="OpsMind",
@@ -168,7 +169,6 @@ def meta() -> Dict[str, Any]:
              "source": "Cloud Billing export to BigQuery",
              "carries": "actual billed cost by service and SKU"},
         ],
-        "demoGatewayConfigured": bool(COGNIKART_GATEWAY_URL),
         "ruleWarnings": _rule_warnings + ruleset.validate_metrics(store),
     }
 
@@ -188,8 +188,61 @@ def overview(window: int = Query(15, ge=1, le=180)) -> Dict[str, Any]:
     }
     recs = recommend_engine.generate(store, window_minutes=max(window, 15))
     data["recommendations"] = {"top": recs[:3], "total": len(recs)}
+
+    # The action queue sits above every chart on the Overview, so it ships with
+    # the overview payload rather than costing the dashboard a second request.
+    anomaly_list = patterns_engine.anomalies(
+        store, window_minutes=max(window, 20))["anomalies"]
+    open_incs = incident_manager.open_incidents()
+    inc_dicts = []
+    for inc in open_incs:
+        d = inc.to_dict(store)
+        d["correlation"] = incident_manager.correlate(inc, store)
+        inc_dicts.append(d)
+    data["actions"] = actions_engine.build(
+        store, incidents=inc_dicts, recommendations=recs,
+        anomalies=anomaly_list,
+        free_tier=cost_engine.free_tier_position(store, window_minutes=max(window, 15)),
+        limit=6,
+    )
+    data["anomalies"] = anomaly_list[:4]
     data["dataSource"] = settings.data_source
     return data
+
+
+@app.get("/api/v1/patterns")
+def patterns(window: int = Query(30, ge=1, le=180),
+             limit: int = Query(20, ge=1, le=60)) -> Dict[str, Any]:
+    """Every log line clustered by message template, not just the failures."""
+    return patterns_engine.log_patterns(store, window_minutes=window, limit=limit)
+
+
+@app.get("/api/v1/anomalies")
+def anomalies(window: int = Query(60, ge=5, le=180),
+              sigma: float = Query(2.5, ge=1.0, le=6.0)) -> Dict[str, Any]:
+    """Series departing from their own recent baseline.
+
+    A fixed threshold cannot answer "is this unusual for this service?" --
+    a service that normally serves 2 req/min jumping to 20 is a tenfold change
+    no threshold would catch.
+    """
+    return patterns_engine.anomalies(store, window_minutes=window, sigma=sigma)
+
+
+@app.get("/api/v1/actions")
+def actions(window: int = Query(15, ge=1, le=180)) -> Dict[str, Any]:
+    """The ranked queue: what someone should do right now."""
+    incs = [i.to_dict(store) for i in incident_manager.all_incidents(limit=20)]
+    for d, inc in zip(incs, incident_manager.all_incidents(limit=20)):
+        if inc.status == "OPEN":
+            d["correlation"] = incident_manager.correlate(inc, store)
+    return actions_engine.build(
+        store,
+        incidents=incs,
+        recommendations=recommend_engine.generate(store, window_minutes=max(window, 15)),
+        anomalies=patterns_engine.anomalies(store, window_minutes=max(window, 20))["anomalies"],
+        free_tier=cost_engine.free_tier_position(store, window_minutes=max(window, 15)),
+    )
 
 
 @app.get("/api/v1/funnel")
@@ -386,30 +439,31 @@ def update_alert(rule_id: str,
 
 # --- incidents ------------------------------------------------------------
 @app.get("/api/v1/incidents")
-def incidents(status: Optional[str] = None,
-              limit: int = Query(30, ge=1, le=100)) -> Dict[str, Any]:
-    items = incident_manager.all_incidents(limit=limit)
-    if status:
-        items = [i for i in items if i.status == status.upper()]
-    out = []
-    for i in items:
-        d = i.to_dict(store)
-        # One cascade legitimately trips several rules on several services.
-        # Correlation lets the UI present them as one story with a named root
-        # cause instead of four unexplained red rows.
-        if i.status == "OPEN":
-            d["correlation"] = incident_manager.correlate(i, store)
-        out.append(d)
-    open_incs = incident_manager.open_incidents()
+def incidents(window: int = Query(360, ge=5, le=1440)) -> Dict[str, Any]:
+    """Incidents rolled up by scope: what is breaching now, what resolved.
+
+    Grouping by scope rather than listing every episode is deliberate. A
+    threshold crossed four times in an hour is one thing to fix; four rows is
+    the alert fatigue that makes people stop reading the page.
+    """
+    data = incident_manager.grouped(store, window_minutes=window)
+    for g in data["breaching"]:
+        inc = incident_manager.get(g["primaryIncidentId"])
+        if inc is not None:
+            g["correlation"] = incident_manager.correlate(inc, store)
     root = None
-    if open_incs:
-        root = incident_manager.correlate(
-            open_incs[-1], store).get("suspectedRootCauseService")
-    return {
-        "incidents": out,
-        "openCount": len(open_incs),
-        "suspectedRootCauseService": root,
-    }
+    if data["breaching"]:
+        root = (data["breaching"][0].get("correlation") or {}).get(
+            "suspectedRootCauseService")
+    data["suspectedRootCauseService"] = root
+    data["dataSources"] = [
+        {"label": "Operational telemetry", "freshness": "near real-time",
+         "tier": "LIVE", "ok": True},
+        {"label": "Billing", "freshness": "daily export",
+         "tier": "AUTHORITATIVE",
+         "ok": False, "note": cost_engine.billed_status()["reason"]},
+    ]
+    return data
 
 
 @app.get("/api/v1/incidents/{incident_id}")
@@ -439,6 +493,97 @@ def analyze_incident(incident_id: str,
 
 
 # --- cost & optimization --------------------------------------------------
+# --- projects -------------------------------------------------------------
+@app.get("/api/v1/projects")
+def projects(refresh: bool = False) -> Dict[str, Any]:
+    """Google Cloud projects this service account can see.
+
+    Real projects, read through the Cloud Resource Manager API -- not a
+    configured list. Each carries whether OpsMind can actually read its logs,
+    because being able to see a project and being able to read it are different
+    permissions and conflating them produces a picker full of dead entries.
+    """
+    from .collectors.gcp_projects import directory
+    return directory.list_projects(refresh=refresh)
+
+
+@app.get("/api/v1/projects/{project_id}/access")
+def project_access(project_id: str, force: bool = False) -> Dict[str, Any]:
+    """Probe whether this project's logs are readable: one tiny Cloud Logging
+    call, which is more conclusive than inferring it from an IAM policy."""
+    from .collectors.gcp_projects import directory
+    return directory.check_access(project_id, force=force)
+
+
+@app.post("/api/v1/projects/select")
+def select_project(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Point OpsMind at a different project.
+
+    One project at a time, by design: switching re-targets the collectors and
+    clears the working set rather than keeping several in memory. Nothing is
+    lost -- Cloud Logging holds the history and the buffer refills within a
+    poll or two.
+    """
+    project_id = (payload.get("projectId") or "").strip()
+    if not project_id:
+        raise HTTPException(status_code=400, detail="projectId is required")
+
+    previous = settings.active_project
+    active = settings.set_active_project(project_id)
+    cleared = store.reset(reason="switched from %s to %s" % (previous, active))
+
+    if settings.data_source == "gcp":
+        from .collectors.gcp_logs import collector as lc
+        from .collectors.gcp_metrics import collector as mc
+        lc.retarget()
+        mc.retarget()
+    incident_manager.__init__()   # incidents belong to the project they came from
+
+    return {
+        "activeProject": active,
+        "previousProject": previous,
+        "cleared": cleared,
+        "note": "The working set was cleared and the collectors re-pointed. "
+                "Charts refill from Cloud Logging within a poll or two.",
+    }
+
+
+@app.get("/api/v1/notifications")
+def notifications(limit: int = Query(20, ge=1, le=60)) -> Dict[str, Any]:
+    """Recent incident transitions, newest first.
+
+    Only transitions: an incident opening or resolving is news, an incident
+    continuing to breach is not. Re-notifying every evaluation is how an alert
+    feed becomes something people mute.
+    """
+    items: List[Dict[str, Any]] = []
+    for t in reversed(evaluator.recent_transitions):
+        for inc_id in t.get("opened", []):
+            inc = incident_manager.get(inc_id)
+            if inc:
+                items.append({
+                    "ts": t["ts"], "kind": "opened", "severity": inc.severity,
+                    "title": inc.title(), "summary": inc.summary(),
+                    "incidentId": inc.id, "service": inc.service,
+                    "episode": inc.episode,
+                })
+        for inc_id in t.get("resolved", []):
+            inc = incident_manager.get(inc_id)
+            if inc:
+                items.append({
+                    "ts": t["ts"], "kind": "resolved", "severity": inc.severity,
+                    "title": inc.title(), "summary": "Stopped breaching.",
+                    "incidentId": inc.id, "service": inc.service,
+                    "episode": inc.episode,
+                })
+    items.sort(key=lambda x: x["ts"], reverse=True)
+    unread = sum(1 for i in items if i["kind"] == "opened")
+    return {"notifications": items[:limit], "total": len(items),
+            "unread": unread,
+            "note": "Transitions only. A condition that keeps breaching is one "
+                    "notification, not one per evaluation."}
+
+
 @app.get("/api/v1/cost")
 def cost(window: int = Query(15, ge=1, le=180)) -> Dict[str, Any]:
     data = cost_engine.rate(store, window_minutes=window)
@@ -490,59 +635,56 @@ def recommendations(window: int = Query(30, ge=1, le=180)) -> Dict[str, Any]:
     }
 
 
-# --- demo control (proxy to CogniKart) ------------------------------------
-@app.get("/api/v1/demo/scenarios")
-async def demo_scenarios() -> Dict[str, Any]:
-    try:
-        async with httpx.AsyncClient(timeout=6.0) as c:
-            r = await c.get(COGNIKART_GATEWAY_URL + "/api/admin/chaos/scenarios")
-        return r.json()
-    except Exception as exc:
-        return {"scenarios": [], "error": "%s: %s" % (type(exc).__name__, exc),
-                "gateway": COGNIKART_GATEWAY_URL}
-
-
-@app.post("/api/v1/demo/scenario")
-async def demo_apply(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Trigger a CogniKart chaos scenario from the dashboard.
-
-    Demo convenience only. This is the one place OpsMind talks to CogniKart,
-    and it carries no telemetry -- it exists so a presenter can inject a
-    failure with one click instead of switching to a terminal.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as c:
-            r = await c.post(COGNIKART_GATEWAY_URL + "/api/admin/chaos/scenario",
-                             json=payload)
-        return r.json()
-    except Exception as exc:
-        raise HTTPException(status_code=502,
-                            detail="cannot reach CogniKart gateway at %s (%s)"
-                                   % (COGNIKART_GATEWAY_URL, exc))
-
-
-@app.get("/api/v1/demo/state")
-async def demo_state() -> Dict[str, Any]:
-    try:
-        async with httpx.AsyncClient(timeout=6.0) as c:
-            r = await c.get(COGNIKART_GATEWAY_URL + "/api/admin/chaos/state")
-        return r.json()
-    except Exception as exc:
-        return {"error": "%s: %s" % (type(exc).__name__, exc)}
-
-
 # --- dashboard ------------------------------------------------------------
 if os.path.isdir(_STATIC):
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
 
+def _asset_version() -> str:
+    """A fingerprint of the dashboard assets.
+
+    Appended to the script and stylesheet URLs so a redeploy cannot leave a
+    browser running yesterday's JavaScript against today's API. Without it the
+    page is cached indefinitely and a user sees a half-updated dashboard with
+    no obvious way to fix it.
+    """
+    newest = 0.0
+    for name in ("app.js", "styles.css", "index.html",
+                 "landing.html", "landing.css", "landing.js"):
+        path = os.path.join(_STATIC, name)
+        if os.path.exists(path):
+            newest = max(newest, os.path.getmtime(path))
+    return hashlib.sha1(str(newest).encode()).hexdigest()[:10]
+
+
+def _page(filename: str) -> Any:
+    path = os.path.join(_STATIC, filename)
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        html = fh.read()
+    v = _asset_version()
+    for asset in ("app.js", "styles.css", "landing.js", "landing.css"):
+        html = html.replace("/static/" + asset, "/static/%s?v=%s" % (asset, v))
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/", include_in_schema=False)
+def landing() -> Any:
+    """The product page. Deliberately a separate document from the dashboard:
+    it has its own visual language and should not pay for the dashboard's
+    JavaScript before anyone has pressed anything."""
+    page = _page("landing.html")
+    return page if page is not None else dashboard()
+
+
+@app.get("/app", include_in_schema=False)
 def dashboard() -> Any:
     index = os.path.join(_STATIC, "index.html")
-    if os.path.exists(index):
-        return FileResponse(index)
-    return JSONResponse({
-        "product": "OpsMind",
-        "status": "API running; dashboard assets not found",
-        "api": "/docs",
-    })
+    if not os.path.exists(index):
+        return JSONResponse({
+            "product": "OpsMind",
+            "status": "API running; dashboard assets not found",
+            "api": "/docs",
+        })
+    return _page("index.html")

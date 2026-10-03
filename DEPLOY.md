@@ -58,26 +58,30 @@ variables:
 export PROJECT_ID=$(gcloud config get-value project) && export REGION=asia-south1 && echo "$PROJECT_ID in $REGION"
 ```
 
-OpsMind needs CogniKart's gateway URL for the Scenario Lab buttons. Fetch it
-rather than retyping it:
+Confirm CogniKart is running, since OpsMind has nothing to watch otherwise:
 
 ```bash
 export GATEWAY_URL=$(gcloud run services describe cognikart-gateway --region $REGION --format 'value(status.url)') && echo $GATEWAY_URL
 ```
 
 If that prints nothing, CogniKart is not deployed — go back to
-`DEPLOY_COGNIKART.md`.
+`DEPLOY_COGNIKART.md`. OpsMind itself never calls that URL; it reads
+everything through the Cloud Logging and Cloud Monitoring APIs.
 
-### Enable the monitoring API
+### Enable the APIs OpsMind needs
 
-Logging is already on from CogniKart. Monitoring is not:
+Logging is already on from CogniKart. Two more are not:
 
 ```bash
-gcloud services enable monitoring.googleapis.com
+gcloud services enable monitoring.googleapis.com cloudresourcemanager.googleapis.com
 ```
 
 Free to enable, as always. You pay for usage, and **reading Google Cloud system
 metrics is not chargeable at all**.
+
+`cloudresourcemanager` is what lets OpsMind list the projects you can see, so
+the project picker shows real projects rather than a list you typed into a
+config file.
 
 ---
 
@@ -124,6 +128,40 @@ gcloud projects get-iam-policy $PROJECT_ID --flatten="bindings[].members" --filt
 
 You should see exactly two roles. If you see more, something granted too much.
 
+### Multi-project: two permissions, deliberately separate
+
+OpsMind's project picker lists the projects it can **see** and tells you, per
+project, whether it can **read** them. Those are different permissions, and
+keeping them apart is the point:
+
+| Permission | Grants | Where |
+|---|---|---|
+| `resourcemanager.projects.get` | seeing a project exists | once, usually org-wide via `roles/browser` |
+| `logging.viewer` | reading that project's logs | per project |
+
+To let the picker enumerate every project in your organisation:
+
+```bash
+export ORG_ID=$(gcloud organizations list --format 'value(ID)' | head -1) && echo $ORG_ID
+```
+
+```bash
+gcloud organizations add-iam-policy-binding $ORG_ID --member "serviceAccount:$SA_MIND" --role roles/browser --condition=None --quiet > /dev/null && echo "granted roles/browser on the org"
+```
+
+**This is optional.** Without it the picker still works — it simply lists only
+the projects OpsMind already has a binding on, which on a single-project
+hackathon is exactly the one that matters.
+
+Log access stays per project on purpose. To connect a second project later:
+
+```bash
+gcloud projects add-iam-policy-binding OTHER_PROJECT_ID --member "serviceAccount:$SA_MIND" --role roles/logging.viewer --condition=None --quiet
+```
+
+The picker prints that exact command for any project it cannot read, so you do
+not have to come back here for it.
+
 > **IAM takes up to a minute to propagate.** If the first deploy reports
 > permission errors in its logs, wait and reload before changing anything.
 
@@ -141,7 +179,7 @@ export DASHBOARD_TOKEN=$(openssl rand -hex 16) && echo "SAVE THIS TOKEN: $DASHBO
 Then deploy:
 
 ```bash
-gcloud run deploy opsmind-portal --source . --region $REGION --service-account $SA_MIND --allow-unauthenticated --memory 512Mi --cpu 1 --concurrency 40 --min-instances 0 --max-instances 2 --set-env-vars "DATA_SOURCE=gcp,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,COGNIKART_GATEWAY_URL=$GATEWAY_URL,DASHBOARD_TOKEN=$DASHBOARD_TOKEN,WATCHED_SERVICES=cognikart-gateway;cognikart-catalog;cognikart-orders;cognikart-payments;opsmind-portal"
+gcloud run deploy opsmind-portal --source . --region $REGION --service-account $SA_MIND --allow-unauthenticated --memory 512Mi --cpu 1 --concurrency 40 --min-instances 0 --max-instances 2 --set-env-vars "DATA_SOURCE=gcp,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,DASHBOARD_TOKEN=$DASHBOARD_TOKEN,SERVICE_ACCOUNT_EMAIL=$SA_MIND,WATCHED_SERVICES=cognikart-gateway;cognikart-catalog;cognikart-orders;cognikart-payments;opsmind-portal"
 ```
 
 The flags that matter here:
@@ -154,9 +192,21 @@ The flags that matter here:
 | `--max-instances 2` | OpsMind keeps its working set in memory. Two instances would each poll and each hold a different view |
 | `--allow-unauthenticated` | Public URL, gated by the token |
 
+OpsMind has **no endpoint that changes anything**, anywhere. Read-only IAM
+roles and a read-only API: it observes and advises, and cannot act on — or
+break — the application it watches. Fault injection lives in CogniKart's own
+Scenario Lab.
+
+`SERVICE_ACCOUNT_EMAIL` is cosmetic: it is only used to print the exact
+`gcloud` command in the picker's "grant access" hints. Nothing authenticates
+with it.
+
 ```bash
 export OPSMIND_URL=$(gcloud run services describe opsmind-portal --region $REGION --format 'value(status.url)') && echo "OPEN THIS: $OPSMIND_URL/?token=$DASHBOARD_TOKEN"
 ```
+
+That URL is the **product page**. The dashboard itself is at `/app`, and the
+Start button routes to `/app#projects` — the project picker.
 
 ---
 
@@ -211,12 +261,16 @@ The payment dropdown produces one failed order: a single log line, not an
 incident. An incident needs a sustained failure rate, which is what the
 Scenario Lab is for.
 
-In OpsMind, pick `payment-timeout-cascade` and press **Inject**, with the load
-generator running. Within about a minute the Incidents view should show a
-suspected root cause of `cognikart-payments`, a cloud cost delta and revenue at
-risk.
+Open **CogniKart's** Scenario Lab, pick `payment-timeout-cascade` and inject it,
+with the load generator running. Within about a minute OpsMind's Incidents view
+should show a suspected root cause of `cognikart-payments`, a cloud cost delta
+and revenue at risk. Expand the incident for its top errors, a sample trace and
+an explanation.
 
-Press **Recover** when you are finished.
+Press **Recover everything** in CogniKart's Scenario Lab when you are finished.
+
+> Injection deliberately lives in the application, not the monitoring tool. A
+> platform that can break what it watches is a harder thing to trust.
 
 ---
 
@@ -252,7 +306,7 @@ depends on an API call succeeding.
 | Dashboard loads, no logs | `DATA_SOURCE` not `gcp` | Check `/api/v1/meta`; redeploy with it set |
 | `lastError` mentions permission | IAM not propagated, or role missing | Wait 60s; re-check Part 4 |
 | Logs appear but no services listed | `WATCHED_SERVICES` used commas | Redeploy with **semicolons** |
-| Scenario Lab buttons fail | `COGNIKART_GATEWAY_URL` wrong or empty | `gcloud run services update opsmind-portal --region $REGION --update-env-vars COGNIKART_GATEWAY_URL=$GATEWAY_URL` |
+| Dashboard shows an old layout after a redeploy | Browser cached the assets | Should not happen — assets are fingerprinted per deploy and the HTML is `no-store`. If it does, hard-reload |
 | Charts empty, logs fine | No traffic yet | Run the load generator |
 | Cost panel shows zero | No completed minute buckets yet | Wait two minutes with traffic |
 

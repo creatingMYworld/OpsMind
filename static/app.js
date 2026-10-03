@@ -8,7 +8,7 @@
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const state = {
-  view: "overview", window: 15, paused: false, logs: [], maxLogs: 1200,
+  view: "overview", window: 15, params: {}, paused: false, logs: [], maxLogs: 1200,
   services: [], es: null, meta: null, charts: {}, incidents: [], scenarios: [],
 };
 
@@ -74,16 +74,73 @@ function upsert(key, canvasId, type, data, optOverrides = {}) {
 }
 function destroyCharts() { Object.values(state.charts).forEach(c => c.destroy()); state.charts = {}; }
 
-/* ---------- navigation ---------- */
-$$("#nav button").forEach(b => b.addEventListener("click", () => {
-  $$("#nav button").forEach(x => x.classList.remove("active"));
-  b.classList.add("active");
+/* ---------- navigation ----------
+   Routing lives in the URL hash, and filters travel with it. Drill-down is the
+   point: see a spike, click it, land on the logs already filtered to it. That
+   only works if the destination receives the context, which means it belongs
+   in the URL rather than in a variable — and as a side effect every view
+   becomes linkable and the browser's back button does the right thing. */
+
+function parseHash() {
+  const raw = (location.hash || "#overview").slice(1);
+  const [view, query = ""] = raw.split("?");
+  return { view: view || "overview", params: Object.fromEntries(new URLSearchParams(query)) };
+}
+function buildHash(view, params = {}) {
+  const clean = Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "" && v !== "ALL");
+  const q = new URLSearchParams(clean).toString();
+  return `#${view}${q ? "?" + q : ""}`;
+}
+function go(view, params = {}) { location.hash = buildHash(view, params); }
+
+function applyRoute() {
+  const { view, params } = parseHash();
+  const known = $("#view-" + view);
+  state.view = known ? view : "overview";
+  state.params = params;
+
+  $$("#nav button").forEach(x => x.classList.toggle("active", x.dataset.view === state.view));
   $$(".view").forEach(v => v.classList.remove("active"));
-  $("#view-" + b.dataset.view).classList.add("active");
-  state.view = b.dataset.view;
+  $("#view-" + state.view).classList.add("active");
+
+  // A drill-down carries its filters; adopt them before the view renders.
+  if (state.view === "logs") {
+    if (params.severity !== undefined) $("#logSev").value = params.severity;
+    if (params.service !== undefined) $("#logSvc").value = params.service;
+    if (params.q !== undefined) $("#logQ").value = params.q;
+    state.logs = [];
+    startStream();
+  }
+  if (params.window) {
+    state.window = +params.window;
+    $("#windowSel").value = String(state.window);
+  }
+  scheduleRefresh();
   refresh();
-}));
-$("#windowSel").addEventListener("change", e => { state.window = +e.target.value; refresh(); });
+}
+
+$$("#nav button").forEach(b => b.addEventListener("click", () => go(b.dataset.view)));
+addEventListener("hashchange", applyRoute);
+$("#windowSel").addEventListener("change", e => {
+  state.window = +e.target.value;
+  scheduleRefresh();
+  refresh();
+});
+
+/* Refresh cadence follows the window. A 1-minute view is useless unless it
+   actually moves; a 3-hour view re-polled every 5s is pure waste — of browser
+   work, of server work, and of the Cloud Logging API quota behind it. */
+const REFRESH_MS = { 1: 5000, 5: 10000, 15: 20000, 60: 45000, 180: 120000 };
+let refreshTimer = null;
+function scheduleRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  const ms = REFRESH_MS[state.window] || 20000;
+  refreshTimer = setInterval(() => { if (!document.hidden) refresh(); }, ms);
+  const sel = $("#windowSel");
+  if (sel) sel.title = `Re-polled every ${Math.round(ms / 1000)}s at this window`;
+  const lbl = $("#liveLabel");
+  if (lbl) lbl.textContent = `live ${Math.round(ms / 1000)}s`;
+}
 $("#themeBtn").addEventListener("click", () => {
   const root = document.documentElement;
   root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
@@ -108,6 +165,8 @@ async function loadMeta() {
   const badge = $("#srcBadge");
   badge.className = "pill " + (src === "gcp" ? "ok" : "info");
   badge.innerHTML = `<span class="dot"></span> ${src === "gcp" ? "GCP — Cloud Logging" : "LOCAL — direct ingest"}`;
+  const rp = $("#railProject");
+  if (rp) rp.textContent = m.config.activeProject || m.config.projectId || "local";
   $("#railMeta").innerHTML =
     `${esc(m.store.bufferedEntries)} entries buffered<br>` +
     `${esc(m.store.errorGroups)} error groups<br>` +
@@ -122,6 +181,7 @@ function setHealthPill(h) {
   const hp = $("#healthPill");
   hp.className = "pill " + cls;
   hp.innerHTML = `<span class="dot"></span> ${esc(h.label)} · ${nf(h.score, 1)}`;
+  return cls;   // the hero tile is coloured to match
 }
 
 /* ---------- overview ---------- */
@@ -132,7 +192,7 @@ async function loadOverview() {
   ]);
   const h = o.health, t = o.technical, b = o.business, c = o.cost;
 
-  setHealthPill(h);
+  const cls = setHealthPill(h);
 
   $("#heroTiles").innerHTML = [
     tile("System health", nf(h.score, 1), `${esc(h.status)} · ${h.penalties.length} penalty factor(s)`, cls),
@@ -172,9 +232,51 @@ async function loadOverview() {
     : o.recommendations.top.map(recCard).join("") +
       `<div class="faint" style="font-size:12px">${o.recommendations.total} total — see Cost &amp; Optimization.</div>`;
 
+  if (o.actions) renderActions(o.actions);
+
   const badge = $("#incBadge");
   badge.style.display = o.incidents.openCount ? "inline-block" : "none";
   badge.textContent = o.incidents.openCount;
+}
+
+function renderActions(q) {
+  const box = $("#actionQueue");
+  $("#actionCount").textContent = q.total
+    ? `${q.firingNow} firing · ${q.total} total` : "all clear";
+  $("#actionHint").textContent = q.ranking;
+  if (!q.actions.length) {
+    box.innerHTML = `<div class="empty">Nothing needs attention. Traffic is healthy and no recommendation is outstanding.</div>`;
+    return;
+  }
+  box.innerHTML = q.actions.map((a, i) => {
+    const sev = { CRITICAL: "crit", HIGH: "err", MEDIUM: "warn", LOW: "muted" }[a.severity] || "muted";
+    const imp = a.impact || {};
+    const bits = [];
+    if (imp.revenueAtRiskInr) bits.push(`<span class="saving">${inr(imp.revenueAtRiskInr)} at risk</span>`);
+    if (imp.cloudCostPerHourUsd) bits.push(`<span class="delta-up">${usd(imp.cloudCostPerHourUsd)}/hr</span>`);
+    if (imp.savingPerMonthUsd) bits.push(`<span class="saving">saves ${usd(imp.savingPerMonthUsd)}/mo</span>`);
+    const cond = (a.evidence && a.evidence.conditions) || [];
+    return `<div class="rec ${a.severity}" data-act="${i}" style="cursor:${a.link ? "pointer" : "default"}">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px">
+        <span class="pill ${a.firing ? "err" : "muted"}"><span class="dot"></span>${a.firing ? "firing" : "standing"}</span>
+        <span class="pill ${sev}">${esc(a.severity)}</span>
+        <strong>${esc(a.title)}</strong>
+        ${a.ageMinutes ? `<span class="faint" style="font-size:11.5px">${nf(a.ageMinutes, 0)}m</span>` : ""}
+      </div>
+      <div class="why">${esc(a.whyItMatters)}</div>
+      <div style="font-size:12.5px;margin-top:5px"><span class="faint">First step —</span> ${esc(a.firstStep)}</div>
+      <div style="font-size:12px;margin-top:3px" class="faint">You'll know it worked when: ${esc(a.howYouWillKnow)}</div>
+      ${cond.length ? `<div class="faint" style="font-size:11.5px;margin-top:5px">${cond.length} condition(s): ${cond.map(c => esc(c.rule)).join(" · ")}</div>` : ""}
+      ${bits.length ? `<div style="font-size:12.5px;margin-top:5px">${bits.join(" &nbsp;·&nbsp; ")}</div>` : ""}
+    </div>`;
+  }).join("");
+  $$("#actionQueue [data-act]").forEach(el => el.addEventListener("click", () => {
+    const a = q.actions[+el.dataset.act];
+    if (!a.link) return;
+    const { view, ...rest } = a.link;
+    if (view === "incidents" && a.link.incident) showIncident(a.link.incident);
+    else go(view, rest);
+  }));
 }
 
 function tile(label, value, foot, cls) {
@@ -220,13 +322,8 @@ function renderServiceTable(svcs) {
         <td><span class="pill ${bad ? "err" : warn ? "warn" : "ok"}"><span class="dot"></span>${bad ? "failing" : warn ? "degraded" : "ok"}</span></td>
       </tr>`;
     }).join("") + `</tbody>`;
-  $$("#svcTable [data-svc]").forEach(tr => tr.addEventListener("click", () => {
-    $$("#nav button").forEach(x => x.classList.remove("active"));
-    $(`#nav button[data-view="resources"]`).classList.add("active");
-    $$(".view").forEach(v => v.classList.remove("active"));
-    $("#view-resources").classList.add("active");
-    state.view = "resources"; refresh();
-  }));
+  $$("#svcTable [data-svc]").forEach(tr => tr.addEventListener("click", () =>
+    go("logs", { service: tr.dataset.svc, severity: "" })));
 }
 function renderFunnel(f) {
   const top = f.stages[0].count || 1;
@@ -392,7 +489,15 @@ async function loadErrors() {
         <td class="num">${nf(g.count)}</td>
         <td class="num">${g.revenueAtRiskInr ? inr(g.revenueAtRiskInr) : "—"}</td>
         <td class="faint">${hms(g.lastSeen)}</td></tr>`).join("") + `</tbody>`;
-  $$("#errTable [data-g]").forEach(tr => tr.addEventListener("click", () => showErrorGroup(e.groups[+tr.dataset.g])));
+  $$("#errTable [data-g]").forEach(tr => {
+    tr.addEventListener("click", ev => {
+      const g = e.groups[+tr.dataset.g];
+      // Shift-click goes straight to the filtered logs; a plain click opens
+      // the group, which is the more common intent.
+      if (ev.shiftKey) go("logs", { q: g.errorCode, service: g.service, severity: "WARNING" });
+      else showErrorGroup(g);
+    });
+  });
 }
 async function showErrorGroup(g) {
   let trace = "";
@@ -464,6 +569,213 @@ async function loadResources() {
 function alignTo(base, rows, key) {
   const by = new Map(rows.map(r => [r.minute, r[key]]));
   return base.map(b => by.has(b.minute) ? by.get(b.minute) : null);
+}
+
+/* ---------- projects ---------- */
+async function loadProjects() {
+  const d = await api("/api/v1/projects");
+  $("#projLede").textContent = d.note || "";
+
+  $("#projError").innerHTML = d.error
+    ? `<div class="notice bad" style="margin-bottom:14px">
+         <strong>Cannot list projects.</strong>
+         <div style="margin-top:5px">${esc(d.error)}</div>
+         ${d.howToFix ? `<div class="mono" style="margin-top:9px;font-size:11.5px">${esc(d.howToFix)}</div>` : ""}
+       </div>` : "";
+
+  if (!d.projects.length) {
+    $("#projGrid").innerHTML = `<div class="empty">No projects visible to this service account.</div>`;
+    return;
+  }
+
+  $("#projGrid").innerHTML = d.projects.map(p => {
+    const state = p.connected === true ? "ok" : p.connected === false ? "err" : "muted";
+    const label = p.connected === true ? "connected"
+                : p.connected === false ? "no log access" : "not checked";
+    return `<div class="card" style="${p.active ? "border-color:var(--accent)" : ""}">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <strong style="font-size:15px">${esc(p.displayName)}</strong>
+        ${p.active ? `<span class="pill info"><span class="dot"></span>viewing</span>` : ""}
+      </div>
+      <div class="mono faint" style="font-size:11.5px;margin-top:3px">${esc(p.projectId)}</div>
+      <div style="margin-top:11px"><span class="pill ${state}"><span class="dot"></span>${label}</span></div>
+      <div class="faint" style="font-size:12px;margin-top:8px;min-height:2.6em">${esc(p.reason || p.note || "Access not yet checked.")}</div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn" data-check="${esc(p.projectId)}">Check access</button>
+        <button class="btn primary" data-open="${esc(p.projectId)}" ${p.active ? "disabled" : ""}>
+          ${p.active ? "Open" : "Open"}</button>
+      </div>
+      <div class="fixhint faint mono" style="font-size:11px;margin-top:9px"></div>
+    </div>`;
+  }).join("");
+
+  $$("#projGrid [data-check]").forEach(b => b.addEventListener("click", async () => {
+    b.disabled = true; b.textContent = "Checking…";
+    const r = await api(`/api/v1/projects/${encodeURIComponent(b.dataset.check)}/access?force=true`);
+    const card = b.closest(".card");
+    card.querySelector(".pill").className = "pill " + (r.connected ? "ok" : "err");
+    card.querySelector(".pill").innerHTML =
+      `<span class="dot"></span>${r.connected ? "connected" : "no log access"}`;
+    card.querySelectorAll(".faint")[1].textContent = r.reason || "";
+    if (r.howToFix) card.querySelector(".fixhint").textContent = r.howToFix;
+    b.disabled = false; b.textContent = "Check access";
+  }));
+
+  $$("#projGrid [data-open]").forEach(b => b.addEventListener("click", async () => {
+    b.disabled = true; b.innerHTML = '<span class="spin"></span>';
+    try {
+      // Switching clears the working set on purpose: the buffered entries
+      // belong to the project being left, and showing them under another
+      // project's name would be a lie that is very hard to spot.
+      await api("/api/v1/projects/select", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: b.dataset.open }),
+      });
+      state.logs = [];
+      toast(`Now viewing ${b.dataset.open}`);
+      go("overview");
+    } catch (e) {
+      toast("Could not switch: " + e.message);
+      b.disabled = false; b.textContent = "Open";
+    }
+  }));
+}
+
+/* ---------- insights: patterns and anomalies ---------- */
+async function loadInsights() {
+  const [an, pat] = await Promise.all([
+    api(`/api/v1/anomalies?window=${Math.max(state.window, 20)}`),
+    api(`/api/v1/patterns?window=${state.window}&limit=25`),
+  ]);
+
+  $("#anomalyList").innerHTML = an.anomalies.length === 0
+    ? `<div class="empty">${esc(an.note || "No series is departing from its baseline.")}</div>`
+    : an.anomalies.map(a => `
+      <div class="rec ${a.severity}">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <strong>${esc(a.label)}</strong>
+          <span class="pill ${a.direction === "up" ? "err" : "info"}">
+            ${a.changePct === null ? "" : (a.changePct > 0 ? "+" : "") + nf(a.changePct, 1) + "%"}</span>
+          <span class="pill muted">z = ${nf(a.zScore, 1)}</span>
+        </div>
+        <div class="why">${esc(a.whyItMatters)}</div>
+        <div class="faint" style="font-size:12px;margin-top:4px">${esc(a.evidence)}</div>
+      </div>`).join("")
+      + `<div class="faint" style="font-size:11.5px;margin-top:8px">${esc(an.method || "")}</div>`;
+
+  $("#patternHint").textContent =
+    `${nf(pat.total)} log lines in this window collapsed into ${nf(pat.distinctPatterns)} distinct patterns. Click one to see its logs.`;
+  $("#patternTable").innerHTML = pat.patterns.length === 0
+    ? `<tbody><tr><td class="empty">No log lines in this window.</td></tr></tbody>`
+    : `<thead><tr><th>Pattern</th><th>Services</th><th class="right">Count</th><th class="right">Share</th><th class="right">p95</th><th class="right">At risk</th></tr></thead><tbody>`
+      + pat.patterns.map((p, i) => `<tr class="clickable" data-p="${i}">
+          <td><span class="sev ${esc(p.severity)}">${esc(p.severity)}</span>
+              <span class="mono" style="margin-left:6px">${esc(p.pattern)}</span></td>
+          <td class="faint">${esc((p.services || []).map(x => x.replace("cognikart-", "")).join(", "))}</td>
+          <td class="num">${nf(p.count)}</td>
+          <td class="num">${nf(p.sharePct, 1)}%</td>
+          <td class="num">${p.p95LatencyMs === null ? "—" : nf(p.p95LatencyMs) + "ms"}</td>
+          <td class="num">${p.revenueAtRiskInr ? inr(p.revenueAtRiskInr) : "—"}</td>
+        </tr>`).join("") + `</tbody>`;
+
+  $$("#patternTable [data-p]").forEach(tr => tr.addEventListener("click", () => {
+    const p = pat.patterns[+tr.dataset.p];
+    // The template has masking tokens in it, so search on the most specific
+    // literal we have instead: an error code, else the event name.
+    const needle = (p.errorCodes && p.errorCodes[0]) || p.topEvent || "";
+    go("logs", { q: needle, service: (p.services || [])[0] || "", severity: "" });
+  }));
+}
+
+/* ---------- services ---------- */
+async function loadServices() {
+  const s = await api(`/api/v1/services?window=${state.window}`);
+  if (!s.services.length) {
+    $("#serviceCards").innerHTML = `<div class="empty">No services reporting yet.</div>`;
+    return;
+  }
+  $("#serviceCards").innerHTML = s.services.map(x => {
+    const bad = x.errorRate5xx > 0.05, warn = x.errorRate5xx > 0.01 || (x.p95LatencyMs || 0) > 2000;
+    const mem = x.memoryUtilisationPct || 0;
+    return `<div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div>
+          <strong style="font-size:15px">${esc(x.service.replace("cognikart-", ""))}</strong>
+          <div class="faint" style="font-size:11px">${esc(x.service)}</div>
+        </div>
+        <span class="pill ${bad ? "err" : warn ? "warn" : "ok"}"><span class="dot"></span>${bad ? "failing" : warn ? "degraded" : "healthy"}</span>
+      </div>
+      <dl class="kv" style="margin-top:12px">
+        <dt>Requests</dt><dd>${nf(x.requests)} <span class="faint">(${nf(x.requestsPerMin, 1)}/min)</span></dd>
+        <dt>Server errors</dt><dd style="color:${x.errors5xx ? "var(--err)" : "inherit"}">${nf(x.errors5xx)} <span class="faint">(${pct(x.errorRate5xx * 100, 2)})</span></dd>
+        <dt>Client errors</dt><dd>${nf(x.errors4xx)}</dd>
+        <dt>Latency p50 / p95</dt><dd>${x.p50LatencyMs === null ? "—" : nf(x.p50LatencyMs) + "ms"} / ${x.p95LatencyMs === null ? "—" : nf(x.p95LatencyMs) + "ms"}</dd>
+        <dt>CPU peak</dt><dd>${x.cpuPctMax === null ? "—" : pct(x.cpuPctMax)}</dd>
+        <dt>Memory</dt><dd>${nf(x.rssMbMax)} / ${nf(x.memoryGibProvisioned * 1024)} MiB <span class="faint">(${pct(mem)})</span></dd>
+        <dt>Instances</dt><dd>${nf(x.instanceCount)}</dd>
+        <dt>Log volume</dt><dd>${nf(x.logBytes / 1048576, 2)} MiB</dd>
+      </dl>
+      ${mem && mem < 40 ? `<div class="faint" style="font-size:11.5px;margin-top:8px;color:var(--money)">Over-provisioned: using ${pct(mem)} of what it reserves.</div>` : ""}
+      <button class="btn" style="margin-top:11px;width:100%" data-svclogs="${esc(x.service)}">Open its logs</button>
+    </div>`;
+  }).join("");
+  $$("#serviceCards [data-svclogs]").forEach(b => b.addEventListener("click", () =>
+    go("logs", { service: b.dataset.svclogs, severity: "" })));
+}
+
+/* ---------- setup ---------- */
+async function loadSetup() {
+  const m = state.meta || await api("/api/v1/meta");
+  const c = m.config;
+  $("#setupTop").innerHTML = `
+    <div class="card">
+      <h3>Source</h3>
+      <div class="hint">Where this dashboard's data comes from.</div>
+      <dl class="kv">
+        <dt>Mode</dt><dd><span class="pill ${c.dataSource === "gcp" ? "ok" : "info"}"><span class="dot"></span>${esc(c.dataSource)}</span></dd>
+        <dt>Project</dt><dd>${esc(c.projectId || "— (local mode)")}</dd>
+        <dt>Region</dt><dd>${esc(c.region)}</dd>
+        <dt>Watching</dt><dd>${(c.watchedServices || []).map(x => esc(x)).join("<br>")}</dd>
+        <dt>Billing model</dt><dd>${esc(c.billingModel)}</dd>
+        <dt>Pricing verified</dt><dd>${esc(c.pricingVerifiedOn || "—")}</dd>
+        <dt>AI explanation</dt><dd>${c.aiEnabled ? esc(c.aiModel) : "disabled (deterministic narrative)"}</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h3>Working set</h3>
+      <div class="hint">OpsMind keeps a bounded in-memory view. Cloud Logging is the durable store; this is not a copy of it.</div>
+      <dl class="kv">
+        <dt>Buffered entries</dt><dd>${nf(m.store.bufferedEntries)} / ${nf(m.store.bufferCapacity)}</dd>
+        <dt>Minute buckets</dt><dd>${nf(m.store.minuteBuckets)}</dd>
+        <dt>Error groups</dt><dd>${nf(m.store.errorGroups)}</dd>
+        <dt>Ingested total</dt><dd>${nf(m.store.ingestedTotal)}</dd>
+        <dt>Duplicates dropped</dt><dd>${nf(m.store.droppedDuplicates)}</dd>
+        <dt>Last ingest</dt><dd>${m.store.lastIngestAgeS === null ? "—" : nf(m.store.lastIngestAgeS, 1) + "s ago"}</dd>
+        <dt>Uptime</dt><dd>${dur(m.uptimeS)}</dd>
+      </dl>
+      ${(m.ruleWarnings || []).length
+        ? `<div class="notice" style="margin-top:10px;color:var(--err)">${m.ruleWarnings.length} alert rule(s) reference a metric the store does not produce and can never fire.</div>`
+        : `<div class="faint" style="font-size:11.5px;margin-top:10px">Every alert rule resolves to a real metric.</div>`}
+    </div>`;
+
+  $("#tierList").innerHTML = m.tiers.map(t => `
+    <div style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:9px">
+        <span class="tier ${t.tier === "LIVE" ? "live" : t.tier === "NEAR_REAL_TIME" ? "near" : "auth"}">${esc(t.tier.replace(/_/g, " "))}</span>
+        <strong style="font-size:13px">${esc(t.latency)}</strong>
+        <span class="faint" style="font-size:12px">${esc(t.source)}</span>
+      </div>
+      <div class="faint" style="font-size:12px;margin-top:3px">${esc(t.carries)}</div>
+    </div>`).join("");
+
+  $("#collectorList").innerHTML = Object.entries(m.collectors).map(([k, v]) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border-soft);font-size:12.5px">
+      <span><strong>${esc(k)}</strong> <span class="faint">${esc(v.collector || "")}</span></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        ${v.lastError ? `<span class="pill err" title="${esc(v.lastError)}">error</span>` : `<span class="pill ${v.running ? "ok" : "muted"}"><span class="dot"></span>${v.running ? "running" : "idle"}</span>`}
+        ${v.lastPollAgeS !== undefined && v.lastPollAgeS !== null ? `<span class="faint">${nf(v.lastPollAgeS, 0)}s ago</span>` : ""}
+      </span>
+    </div>`).join("");
 }
 
 /* ---------- cost ---------- */
@@ -582,27 +894,114 @@ async function loadAlerts() {
 
 /* ---------- incidents ---------- */
 async function loadIncidents() {
-  const d = await api("/api/v1/incidents");
-  state.incidents = d.incidents;
+  const d = await api(`/api/v1/incidents?window=${Math.max(state.window, 360)}`);
+  const st = d.stats;
+
+  $("#incTiles").innerHTML = [
+    tile("Breaching now", nf(st.breachingNow), "Thresholds currently crossed",
+         st.breachingNow ? "err" : "ok"),
+    tile("Resolved", nf(st.resolvedInWindow), "Stopped breaching during this window"),
+    tile("Total episodes", nf(st.totalEpisodes),
+         `Across ${nf(st.distinctIncidents)} distinct incident${st.distinctIncidents === 1 ? "" : "s"}`),
+    tile("Critical", nf(st.critical), "Highest-severity incidents",
+         st.critical ? "err" : "muted"),
+  ].join("");
+
+  // Say plainly which numbers are live and which are a day behind. A reader
+  // who does not know the difference will trust the stale one.
+  $("#incLegend").innerHTML = (d.dataSources || []).map(x => `
+    <span class="k" title="${esc(x.note || "")}">
+      <i style="background:${x.ok ? "var(--ok)" : "var(--clay, var(--warn))"}"></i>
+      ${esc(x.label)} · ${esc(x.freshness)}
+    </span>`).join("");
+
   $("#rootCauseBanner").innerHTML = d.suspectedRootCauseService
-    ? `<div class="card" style="margin-bottom:14px;border-color:var(--err)">
+    ? `<div class="card" style="border-color:var(--err)">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span class="pill err"><span class="dot"></span>suspected root cause</span>
           <strong style="font-size:16px">${esc(d.suspectedRootCauseService)}</strong>
-          <span class="faint" style="font-size:12.5px">identified from failing-dependency citations across ${d.openCount} open incident(s) — inspect this service first, not the ones that alerted.</span>
+          <span class="faint" style="font-size:12.5px">identified from failing-dependency citations — inspect this service first, not the ones that alerted.</span>
         </div></div>` : "";
-  $("#incList").innerHTML = d.incidents.length === 0
-    ? `<div class="empty">No incidents recorded yet. Inject a scenario from the header to create one.</div>`
-    : d.incidents.map(i => `<div class="card" style="margin-bottom:12px;cursor:pointer" data-inc="${esc(i.id)}">${incRow(i)}</div>`).join("");
-  $$("#incList [data-inc]").forEach(e => e.addEventListener("click", () => showIncident(e.dataset.inc)));
+
+  renderIncidentGroups("#incBreaching", d.breaching, "Nothing is breaching.");
+  renderIncidentGroups("#incResolved", d.resolved, "Nothing resolved in this window.");
+
   const badge = $("#incBadge");
-  badge.style.display = d.openCount ? "inline-block" : "none";
-  badge.textContent = d.openCount;
+  badge.style.display = st.breachingNow ? "inline-block" : "none";
+  badge.textContent = st.breachingNow;
 }
 
-async function showIncident(id) {
-  openDrawer("Loading incident…", "", `<div class="empty"><span class="spin"></span></div>`);
-  const d = await api("/api/v1/incidents/" + id);
+function renderIncidentGroups(sel, groups, emptyMsg) {
+  const box = $(sel);
+  if (!groups.length) { box.innerHTML = `<div class="empty">${esc(emptyMsg)}</div>`; return; }
+  box.innerHTML = groups.map((g, i) => {
+    const spark = (g.sparkline || []).map(v =>
+      `<i class="${v > 0.55 ? "hot" : ""}" style="height:${Math.max(8, v * 100)}%"></i>`).join("");
+    const when = g.status === "BREACHING" ? "just now" : ago(g.resolvedAt);
+    return `<div class="inc-row ${esc(g.severity)}" data-grp="${esc(sel)}-${i}">
+      <div class="inc-top">
+        <div style="flex:1;min-width:240px">
+          <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+            <h4>${esc(g.title)}</h4>
+            <span class="pill ${{ CRITICAL: "crit", HIGH: "err", MEDIUM: "warn" }[g.severity] || "muted"}">${esc(g.severity)}</span>
+            ${g.episodes > 1 ? `<span class="pill muted">${g.episodes} episodes</span>` : ""}
+          </div>
+          <div class="inc-sum">${esc(g.summary)}</div>
+          <div class="inc-meta">
+            <span>Breaching for<strong>${durShort(g.breachingForS)}</strong></span>
+            <span>Across<strong>${durShort(g.acrossS)}</strong></span>
+            <span>Matching entries<strong>${nf(g.matchingEntries)}</strong></span>
+            ${g.ruleWindowMinutes ? `<span>Rule window<strong>${g.ruleWindowMinutes}m</strong></span>` : ""}
+            <span>Started<strong>${hms(g.startedAt)}</strong></span>
+          </div>
+        </div>
+        <div class="inc-right">
+          <div class="spark">${spark}</div>
+          <span class="faint" style="font-size:12px;min-width:62px;text-align:right">${when}</span>
+          <button class="chev" data-exp="${esc(g.primaryIncidentId)}" title="Show impact, root cause, errors and trace">▾</button>
+        </div>
+      </div>
+      <div class="inc-detail" id="det-${esc(g.primaryIncidentId)}"></div>
+    </div>`;
+  }).join("");
+
+  $$(sel + " [data-exp]").forEach(btn => btn.addEventListener("click", async () => {
+    const id = btn.dataset.exp;
+    const panel = $("#det-" + CSS.escape(id));
+    if (panel.classList.contains("open")) {
+      panel.classList.remove("open"); btn.textContent = "▾"; return;
+    }
+    panel.classList.add("open"); btn.textContent = "▴";
+    panel.innerHTML = `<div class="empty"><span class="spin"></span> loading evidence…</div>`;
+    panel.innerHTML = await incidentDetailHtml(id);
+    wireExplain(panel, id);
+  }));
+}
+
+function durShort(s) {
+  if (s === null || s === undefined) return "—";
+  if (s < 90) return `${Math.round(s)}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  return `${(s / 3600).toFixed(1)}h`;
+}
+function ago(ts) {
+  if (!ts) return "—";
+  const s = Date.now() / 1000 - ts;
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+/* The evidence that sits beneath an incident, in the order a responder reads
+   it: what it cost, what probably caused it, what actually failed, one request
+   end to end, then a narrative. Everything is built from the deterministic
+   evidence bundle -- the explanation narrates it and adds nothing. */
+async function incidentDetailHtml(id) {
+  let d;
+  try { d = await api("/api/v1/incidents/" + id); }
+  catch (e) { return `<div class="empty">Could not load evidence: ${esc(e.message)}</div>`; }
+
   const ev = d.evidence, c = ev.correlation, md = ev.metricsDelta;
   const cost = ev.impact.cost, biz = ev.impact.business;
 
@@ -613,80 +1012,85 @@ async function showIncident(id) {
       <td class="num ${up ? "delta-up" : "delta-down"}">${nf(p.during, dec)}${unit}</td></tr>`;
   };
 
-  openDrawer(esc(d.title),
-    `<span class="pill ${d.status === "OPEN" ? "err" : "ok"}">${esc(d.status)}</span>
-     <span class="pill ${{ CRITICAL: "crit", HIGH: "err", MEDIUM: "warn" }[d.severity] || "muted"}">${esc(d.severity)}</span>
-     <span class="faint">${dur(d.durationS)} · started ${hms(d.startedAt)}</span>`,
-    `<h3>Impact</h3>
-     <div class="grid g2">
-       <div class="card"><div class="label faint" style="font-size:11px">CLOUD COST (modeled)</div>
-         <div style="font-size:24px;font-weight:700" class="${(cost.deltaUsdPerHour||0)>0?"delta-up":"delta-down"}">
-           ${(cost.deltaUsdPerHour||0)>0?"+":""}${usd(cost.deltaUsdPerHour)}<span class="faint" style="font-size:14px">/hr</span></div>
-         <div class="faint" style="font-size:11.5px">baseline ${usd(cost.baselineUsdPerHour)}/hr · dominant driver ${esc(cost.dominantDriver || "—")}</div>
-         <div class="faint" style="font-size:11.5px">incurred so far ${usd(cost.incurredUsdSoFar, 5)}</div></div>
-       <div class="card"><div class="label faint" style="font-size:11px">REVENUE AT RISK (measured)</div>
-         <div style="font-size:24px;font-weight:700" class="saving">${inr(biz.revenueAtRiskInr)}</div>
-         <div class="faint" style="font-size:11.5px">${nf(biz.failedCheckouts)} failed checkouts · success ${pct(biz.checkoutSuccessRatePct)}</div></div>
-     </div>
-     <div class="faint" style="font-size:11px;margin-top:6px">${esc(cost.disclaimer)}</div>
+  const citations = Object.entries(c.dependencyCitations || {});
+  const maxCite = citations.length ? Math.max(...citations.map(([, v]) => v)) : 1;
 
-     <h3>Suspected root cause</h3>
-     ${c.suspectedRootCauseService ? `
-       <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
-         <span class="pill err"><span class="dot"></span>${esc(c.suspectedRootCauseService)}</span>
-         ${c.isLikelyDownstream ? `<span class="faint" style="font-size:12px">this service is downstream, not at fault</span>` : ""}
-       </div>
-       <div class="faint" style="font-size:12px;margin-bottom:7px">${esc(c.rootCauseBasis)}</div>
-       ${Object.entries(c.dependencyCitations).map(([k, v]) => {
-          const max = Math.max(...Object.values(c.dependencyCitations));
-          return `<div style="font-size:12px;display:flex;justify-content:space-between"><span>${esc(k)}</span><span class="num">${nf(v)}</span></div>
-                  <div class="bar-track" style="margin-bottom:5px"><div class="bar-fill err" style="width:${100*v/max}%"></div></div>`;
-       }).join("")}` : `<div class="faint">Not determinable from this window.</div>`}
+  return `
+    <h5>Impact</h5>
+    <div class="grid g2">
+      <div class="card"><div class="label faint" style="font-size:11px">CLOUD COST (modeled)</div>
+        <div style="font-size:23px;font-weight:700" class="${(cost.deltaUsdPerHour || 0) > 0 ? "delta-up" : "delta-down"}">
+          ${(cost.deltaUsdPerHour || 0) > 0 ? "+" : ""}${usd(cost.deltaUsdPerHour)}<span class="faint" style="font-size:13px">/hr</span></div>
+        <div class="faint" style="font-size:11.5px">baseline ${usd(cost.baselineUsdPerHour)}/hr · dominant driver ${esc(cost.dominantDriver || "—")}</div>
+        <div class="faint" style="font-size:11.5px">incurred so far ${usd(cost.incurredUsdSoFar, 5)}</div></div>
+      <div class="card"><div class="label faint" style="font-size:11px">REVENUE AT RISK (measured)</div>
+        <div style="font-size:23px;font-weight:700" class="saving">${inr(biz.revenueAtRiskInr)}</div>
+        <div class="faint" style="font-size:11.5px">${nf(biz.failedCheckouts)} failed checkouts · success ${pct(biz.checkoutSuccessRatePct)}</div></div>
+    </div>
+    <div class="faint" style="font-size:11px;margin-top:6px">${esc(cost.disclaimer)}</div>
 
-     <h3>Triggered conditions</h3>
-     ${d.triggers.map(t => `<div style="font-size:12.5px;margin-bottom:5px">
-        <strong>${esc(t.ruleName)}</strong> — observed <span class="delta-up">${nf(t.observed, 2)}${esc(t.unit)}</span>
-        vs threshold ${nf(t.threshold, 2)}${esc(t.unit)} <span class="pill muted">${esc(t.source)}</span></div>`).join("")}
+    <h5>Suspected root cause</h5>
+    ${c.suspectedRootCauseService ? `
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;flex-wrap:wrap">
+        <span class="pill err"><span class="dot"></span>${esc(c.suspectedRootCauseService)}</span>
+        ${c.isLikelyDownstream ? `<span class="faint" style="font-size:12px">this service is downstream, not at fault</span>` : ""}
+      </div>
+      <div class="faint" style="font-size:12px;margin-bottom:7px">${esc(c.rootCauseBasis || "")}</div>
+      ${citations.map(([k, v]) => `
+        <div style="font-size:12px;display:flex;justify-content:space-between"><span>${esc(k)}</span><span class="num">${nf(v)}</span></div>
+        <div class="bar-track" style="margin-bottom:5px"><div class="bar-fill err" style="width:${100 * v / maxCite}%"></div></div>`).join("")}`
+      : `<div class="faint">Not determinable from this window.</div>`}
 
-     <h3>Before vs during</h3>
-     <table><thead><tr><th>Metric</th><th class="right">Before</th><th class="right">During</th></tr></thead><tbody>
-       ${deltaRow("Requests / min", md.requestsPerMin)}
-       ${deltaRow("5xx / min", md.errors5xxPerMin)}
-       ${deltaRow("p95 latency", md.p95LatencyMs, "ms", 0)}
-       ${deltaRow("Retries / min", md.retriesPerMin)}
-       ${deltaRow("Payment attempts / min", md.paymentAttemptsPerMin)}
-       ${deltaRow("Log volume", md.logMibPerMin, " MiB", 3)}
-       ${deltaRow("Instances (max)", md.instanceCountMax, "", 0)}
-     </tbody></table>
+    <h5>Top errors</h5>
+    ${ev.topErrors.length ? ev.topErrors.map(e => `
+      <div style="font-size:12.5px;display:flex;justify-content:space-between;padding:3px 0">
+        <span><strong style="color:var(--err)">${esc(e.errorCode)}</strong>
+          <span class="faint">${esc(e.service)} ${esc(e.route || "")}</span></span>
+        <span class="num">${nf(e.count)}</span></div>`).join("")
+      : '<div class="faint">None grouped in this window.</div>'}
 
-     <h3>Top errors</h3>
-     ${ev.topErrors.map(e => `<div style="font-size:12.5px;display:flex;justify-content:space-between">
-        <span><strong style="color:var(--err)">${esc(e.errorCode)}</strong> <span class="faint">${esc(e.service)}</span></span>
-        <span class="num">${nf(e.count)}</span></div>`).join("") || '<div class="faint">none</div>'}
-
-     <h3>Timeline</h3>
-     <div class="tl">${d.timeline.map(t => `<div class="tl-item ${esc(t.kind)}">
-        <div class="t">${hms(t.ts)} · ${esc(t.kind)}</div><div style="font-size:12.5px">${esc(t.text)}</div></div>`).join("")}</div>
-
-     <h3>Sample trace</h3>
-     ${ev.sampleTrace.length ? ev.sampleTrace.map(e => `<div style="font-size:12px;display:flex;gap:9px">
-        <span class="faint" style="width:78px">${esc((e.service||"").replace("cognikart-",""))}</span>
+    <h5>Sample trace</h5>
+    ${ev.sampleTrace.length ? ev.sampleTrace.map(e => `
+      <div style="font-size:12px;display:flex;gap:9px;padding:2px 0">
+        <span class="faint" style="width:78px">${esc((e.service || "").replace("cognikart-", ""))}</span>
         <span class="mono" style="flex:1">${esc(e.event)}</span>
-        <span class="num faint">${e.latencyMs != null ? nf(e.latencyMs)+"ms" : ""}</span>
-        <span style="color:${(e.httpStatus||0)>=500?"var(--err)":"inherit"}">${e.httpStatus ?? ""}</span>
-      </div>`).join("") : '<div class="faint">none buffered</div>'}
+        <span class="num faint">${e.latencyMs != null ? nf(e.latencyMs) + "ms" : ""}</span>
+        <span style="width:34px;text-align:right;color:${(e.httpStatus || 0) >= 500 ? "var(--err)" : "inherit"}">${e.httpStatus ?? ""}</span>
+      </div>`).join("")
+      : '<div class="faint">No trace still buffered for this window.</div>'}
 
-     <h3>Explain</h3>
-     <button class="btn primary" id="explainBtn">Explain this incident</button>
-     <div id="explainOut" style="margin-top:12px"></div>`);
+    <h5>Explain</h5>
+    <button class="btn primary" data-explain="${esc(id)}">Explain this incident</button>
+    <div class="explain-out" style="margin-top:11px"></div>
 
-  $("#explainBtn").addEventListener("click", async () => {
-    $("#explainBtn").disabled = true;
-    $("#explainOut").innerHTML = `<span class="spin"></span> analysing evidence…`;
+    <h5>Before vs during</h5>
+    <table><thead><tr><th>Metric</th><th class="right">Before</th><th class="right">During</th></tr></thead><tbody>
+      ${deltaRow("Requests / min", md.requestsPerMin)}
+      ${deltaRow("5xx / min", md.errors5xxPerMin)}
+      ${deltaRow("p95 latency", md.p95LatencyMs, "ms", 0)}
+      ${deltaRow("Retries / min", md.retriesPerMin)}
+      ${deltaRow("Payment attempts / min", md.paymentAttemptsPerMin)}
+      ${deltaRow("Log volume", md.logMibPerMin, " MiB", 3)}
+      ${deltaRow("Instances (max)", md.instanceCountMax, "", 0)}
+    </tbody></table>
+
+    <h5>Timeline</h5>
+    <div class="tl">${d.timeline.map(t => `<div class="tl-item ${esc(t.kind)}">
+      <div class="t">${hms(t.ts)} · ${esc(t.kind)}</div>
+      <div style="font-size:12.5px">${esc(t.text)}</div></div>`).join("")}</div>`;
+}
+
+function wireExplain(root, id) {
+  const btn = root.querySelector("[data-explain]");
+  const out = root.querySelector(".explain-out");
+  if (!btn || !out) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    out.innerHTML = `<span class="spin"></span> analysing evidence…`;
     try {
       const r = await api(`/api/v1/incidents/${id}/analyze`, { method: "POST" });
       const g = r.grounding;
-      $("#explainOut").innerHTML = `
+      out.innerHTML = `
         <div style="display:flex;gap:7px;margin-bottom:9px;flex-wrap:wrap">
           <span class="pill ${r.provider === "vertex-ai" ? "info" : "muted"}">${esc(r.provider)}${r.model ? " · " + esc(r.model) : ""}</span>
           <span class="pill ${g.grounded ? "ok" : "warn"}"><span class="dot"></span>${g.grounded ? "fully grounded" : g.unsupportedNumbers.length + " unverified number(s)"}</span>
@@ -697,36 +1101,81 @@ async function showIncident(id) {
         <pre class="json" style="white-space:pre-wrap;color:var(--text)">${esc(r.narrative)}</pre>
         <div class="faint" style="font-size:11px">${esc(g.method)}</div>`;
     } catch (e) {
-      $("#explainOut").innerHTML = `<div class="faint">Explanation failed: ${esc(e.message)}</div>`;
+      out.innerHTML = `<div class="faint">Explanation failed: ${esc(e.message)}</div>`;
     }
-    $("#explainBtn").disabled = false;
+    btn.disabled = false;
   });
 }
 
-/* ---------- demo control ---------- */
-async function loadScenarios() {
+/* Opened from the action queue, which links to a specific incident. */
+async function showIncident(id) {
+  openDrawer("Loading incident…", "", `<div class="empty"><span class="spin"></span></div>`);
+  let head = { title: "Incident", sub: "" };
   try {
-    const d = await api("/api/v1/demo/scenarios");
-    state.scenarios = d.scenarios || [];
-    $("#scenarioSel").innerHTML = state.scenarios.length
-      ? state.scenarios.filter(s => s.name !== "recover-all")
-          .map(s => `<option value="${esc(s.name)}" title="${esc(s.description)}">${esc(s.name)} [${esc(s.priority)}]</option>`).join("")
-      : `<option value="">CogniKart not reachable</option>`;
-  } catch { $("#scenarioSel").innerHTML = `<option value="">CogniKart not reachable</option>`; }
+    const d = await api("/api/v1/incidents/" + id);
+    head = {
+      title: esc(d.title),
+      sub: `<span class="pill ${d.status === "OPEN" ? "err" : "ok"}">${esc(d.status)}</span>
+            <span class="pill ${{ CRITICAL: "crit", HIGH: "err", MEDIUM: "warn" }[d.severity] || "muted"}">${esc(d.severity)}</span>
+            <span class="faint">${dur(d.durationS)} · started ${hms(d.startedAt)}</span>`,
+    };
+  } catch (e) { /* fall through to the error the body renders */ }
+  openDrawer(head.title, head.sub, await incidentDetailHtml(id));
+  wireExplain($("#drawerBody"), id);
 }
-$("#applyScenario").addEventListener("click", async () => {
-  const name = $("#scenarioSel").value; if (!name) return;
-  const btn = $("#applyScenario"); btn.disabled = true; btn.textContent = "Injecting…";
-  try { await api("/api/v1/demo/scenario", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); }
-  catch (e) { alert("Could not reach CogniKart: " + e.message); }
-  btn.disabled = false; btn.textContent = "Inject";
-  setTimeout(refresh, 1500);
+
+/* ---------- header controls ----------
+   No fault-injection control here, deliberately. OpsMind holds read-only IAM
+   roles and exposes a read-only API: it observes and advises, and cannot act
+   on -- or break -- the application it watches. Injection lives in CogniKart's
+   own Scenario Lab, which is where it belongs. */
+
+$("#refreshBtn").addEventListener("click", async () => {
+  const b = $("#refreshBtn");
+  b.disabled = true; b.textContent = "⟳ …";
+  await refresh();
+  b.disabled = false; b.textContent = "⟳ Refresh";
 });
-$("#recoverBtn").addEventListener("click", async () => {
-  const btn = $("#recoverBtn"); btn.disabled = true;
-  try { await api("/api/v1/demo/scenario", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "recover-all" }) }); } catch {}
-  btn.disabled = false; setTimeout(refresh, 1500);
+
+let notifOpen = false;
+$("#bellBtn").addEventListener("click", async () => {
+  notifOpen = !notifOpen;
+  $("#notifPanel").hidden = !notifOpen;
+  if (notifOpen) await loadNotifications();
 });
+document.addEventListener("click", e => {
+  if (!notifOpen) return;
+  if (e.target.closest("#notifPanel") || e.target.closest("#bellBtn")) return;
+  notifOpen = false; $("#notifPanel").hidden = true;
+});
+
+async function loadNotifications() {
+  const n = await api("/api/v1/notifications?limit=25");
+  $("#notifNote").textContent = n.note;
+  $("#notifList").innerHTML = n.notifications.length === 0
+    ? `<div class="empty">Nothing has opened or resolved recently.</div>`
+    : n.notifications.map(x => `
+      <div class="notif-item" data-inc="${esc(x.incidentId)}">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span class="pill ${x.kind === "opened" ? "err" : "ok"}"><span class="dot"></span>${x.kind}</span>
+          <span class="pill ${{ CRITICAL: "crit", HIGH: "err", MEDIUM: "warn" }[x.severity] || "muted"}">${esc(x.severity)}</span>
+          <span class="faint" style="font-size:11.5px;margin-left:auto">${hms(x.ts)}</span>
+        </div>
+        <div style="font-weight:600;font-size:13px;margin-top:6px">${esc(x.title)}</div>
+        <div class="faint" style="font-size:12px;margin-top:2px">${esc(x.summary)}</div>
+        ${x.episode > 1 ? `<div class="faint" style="font-size:11px;margin-top:3px">episode ${x.episode}</div>` : ""}
+      </div>`).join("");
+  $$("#notifList [data-inc]").forEach(el => el.addEventListener("click", () => {
+    notifOpen = false; $("#notifPanel").hidden = true;
+    go("incidents");
+  }));
+}
+
+function paintBell(unread) {
+  const b = $("#bellBadge");
+  b.hidden = !unread;
+  b.textContent = unread > 99 ? "99+" : unread;
+}
 
 /* ---------- orchestration ---------- */
 async function refresh() {
@@ -737,30 +1186,33 @@ async function refresh() {
       $("#logSvc").innerHTML = `<option value="">all services</option>` +
         s.services.map(x => `<option value="${esc(x.service)}">${esc(x.service)}</option>`).join("");
     }
-    if (state.view === "overview") await loadOverview();
+    if (state.view === "projects") await loadProjects();
+    else if (state.view === "overview") await loadOverview();
     else if (state.view === "logs") await loadLogsInitial();
+    else if (state.view === "insights") await loadInsights();
+    else if (state.view === "services") await loadServices();
+    else if (state.view === "setup") await loadSetup();
     else if (state.view === "errors") await loadErrors();
     else if (state.view === "resources") await loadResources();
     else if (state.view === "cost") await loadCost();
     else if (state.view === "alerts") await loadAlerts();
     else if (state.view === "incidents") await loadIncidents();
     if (state.view !== "overview") {
-      const [o, d] = await Promise.all([
-        api(`/api/v1/overview?window=${state.window}`),
-        api("/api/v1/incidents"),
-      ]);
+      const o = await api(`/api/v1/overview?window=${state.window}`);
       setHealthPill(o.health);
+      const open = (o.incidents && o.incidents.openCount) || 0;
       const badge = $("#incBadge");
-      badge.style.display = d.openCount ? "inline-block" : "none";
-      badge.textContent = d.openCount;
+      badge.style.display = open ? "inline-block" : "none";
+      badge.textContent = open;
     }
+    const n = await api("/api/v1/notifications?limit=25");
+    paintBell(n.unread);
+    if (notifOpen) await loadNotifications();
   } catch (e) { console.error("refresh failed", e); }
 }
 
 (async function init() {
-  await loadScenarios();
-  await refresh();
   startStream();
-  setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+  applyRoute();          // reads the hash, sets the view, starts the timer
 })();
 })();

@@ -93,7 +93,7 @@ class GcpMetricCollector:
     def _ensure_client(self) -> Any:
         if self._client is None:
             from google.cloud import monitoring_v3
-            if not settings.project_id:
+            if not (settings.active_project or settings.project_id):
                 raise RuntimeError(
                     "GOOGLE_CLOUD_PROJECT is not set; cannot query Cloud Monitoring")
             self._client = monitoring_v3.MetricServiceClient()
@@ -119,7 +119,7 @@ class GcpMetricCollector:
         })
         services = " OR ".join('"%s"' % s for s in settings.watched_services)
         request = monitoring_v3.ListTimeSeriesRequest(
-            name="projects/%s" % settings.project_id,
+            name="projects/%s" % (settings.active_project or settings.project_id),
             filter=(
                 'metric.type="%s" AND resource.type="cloud_run_revision" '
                 'AND resource.labels.service_name=(%s)'
@@ -193,6 +193,13 @@ class GcpMetricCollector:
         self._thread = threading.Thread(
             target=self._loop, daemon=True, name="gcp-metric-collector")
         self._thread.start()
+
+    def retarget(self) -> None:
+        """Forget the previous project's series on a switch."""
+        with self._lock:
+            self._snapshot = {}
+            self.errors = {}
+            self.last_poll_ts = 0.0
 
     def stop(self) -> None:
         self._stop.set()

@@ -12,17 +12,21 @@
 
   <aside class="rail">
     <div class="brand">
-      <h1>OpsMind</h1>
-      <div class="sub">observing <strong>CogniKart</strong></div>
+      <h1><a href="/" style="color:inherit;text-decoration:none">OpsMind</a></h1>
+      <div class="sub">project <strong id="railProject">—</strong></div>
     </div>
     <nav class="nav" id="nav">
+      <button data-view="projects"><span class="ico">▣</span> Projects</button>
       <button data-view="overview" class="active"><span class="ico">◉</span> Overview</button>
+      <button data-view="incidents"><span class="ico">✸</span> Incidents <span class="badge" id="incBadge" style="display:none">0</span></button>
+      <button data-view="insights"><span class="ico">◈</span> Insights</button>
+      <button data-view="services"><span class="ico">▦</span> Services</button>
       <button data-view="logs"><span class="ico">≡</span> Live Logs</button>
       <button data-view="errors"><span class="ico">⚠</span> Errors</button>
       <button data-view="resources"><span class="ico">▤</span> Resources</button>
       <button data-view="cost"><span class="ico">₹</span> Cost &amp; Optimization</button>
       <button data-view="alerts"><span class="ico">⏱</span> Alerts</button>
-      <button data-view="incidents"><span class="ico">✸</span> Incidents <span class="badge" id="incBadge" style="display:none">0</span></button>
+      <button data-view="setup"><span class="ico">⚙</span> Setup</button>
     </nav>
     <div class="rail-foot">
       <div id="srcBadge" class="pill muted" style="margin-bottom:6px"><span class="dot"></span> connecting…</div>
@@ -34,17 +38,19 @@
     <header class="topbar">
       <span id="healthPill" class="pill muted"><span class="dot"></span> —</span>
       <span class="faint" style="font-size:12px">window</span>
-      <select id="windowSel">
+      <select id="windowSel" title="Refresh cadence follows the window: a 1-minute view is useless unless it moves, and a 3-hour view re-polling every 5s is waste">
+        <option value="1">1 min</option>
         <option value="5">5 min</option>
         <option value="15" selected>15 min</option>
         <option value="60">1 hour</option>
         <option value="180">3 hours</option>
       </select>
       <span class="spacer"></span>
-      <span class="faint" style="font-size:12px">demo</span>
-      <select id="scenarioSel" style="min-width:210px"><option>loading…</option></select>
-      <button class="btn primary" id="applyScenario">Inject</button>
-      <button class="btn danger" id="recoverBtn">Recover</button>
+      <span class="live-dot" id="liveDot" title="Polling cadence follows the selected window"><span class="dot"></span><span id="liveLabel">live</span></span>
+      <button class="btn" id="refreshBtn" title="Refresh now">⟳ Refresh</button>
+      <button class="btn bell" id="bellBtn" title="Recent incident transitions">
+        <span>◔</span><span class="bell-badge" id="bellBadge" hidden>0</span>
+      </button>
       <button class="btn" id="themeBtn" title="Toggle theme">◐</button>
     </header>
 
@@ -52,6 +58,13 @@
     <section class="view active" id="view-overview">
       <h2>Overview</h2>
       <div class="lede">System health, traffic, business outcome and modeled cloud spend for CogniKart.</div>
+
+      <div class="card" id="actionCard" style="margin-bottom:14px">
+        <h3>What to do now <span id="actionCount" class="pill muted"></span></h3>
+        <div class="hint" id="actionHint">Ranked by urgency, not severity — a resolved CRITICAL sits below a firing MEDIUM, because only one of them needs someone now.</div>
+        <div id="actionQueue"></div>
+      </div>
+
       <div class="grid g4" id="heroTiles"></div>
       <div class="grid g2" style="margin-top:14px">
         <div class="card">
@@ -172,14 +185,91 @@
       <div id="alertList"></div>
     </section>
 
+    <!-- PROJECTS -->
+    <section class="view" id="view-projects">
+      <h2>Choose a project</h2>
+      <div class="lede" id="projLede">Google Cloud projects this installation can see. Listing a project and being able to read its logs are different permissions — each card says which it has.</div>
+      <div id="projError"></div>
+      <div class="grid g3" id="projGrid"></div>
+      <div class="card" style="margin-top:14px">
+        <h3>How access works</h3>
+        <div class="hint">Two permissions, deliberately separate.</div>
+        <dl class="kv">
+          <dt><code class="mono">resourcemanager.projects.get</code></dt><dd>Lets OpsMind <strong>see</strong> a project. Usually granted once as <code class="mono">roles/browser</code> at the organization level.</dd>
+          <dt><code class="mono">logging.viewer</code></dt><dd>Lets OpsMind <strong>read</strong> that project's logs. Granted per project, because log access is not something to hand out organization-wide by default.</dd>
+        </dl>
+      </div>
+    </section>
+
+    <!-- INSIGHTS -->
+    <section class="view" id="view-insights">
+      <h2>Insights</h2>
+      <div class="lede">Repeating log patterns and statistical anomalies. Both are deterministic: identical inputs always produce identical findings, and every finding carries the evidence behind it.</div>
+      <div class="card" style="margin-bottom:14px">
+        <h3>Anomalies <span class="tier live">live</span></h3>
+        <div class="hint">Each series compared against its own recent baseline. A fixed threshold cannot answer "is this unusual <em>for this service</em>?" — a service that normally serves 2 req/min jumping to 20 is a tenfold change no threshold would catch.</div>
+        <div id="anomalyList"></div>
+      </div>
+      <div class="card">
+        <h3>Log patterns</h3>
+        <div class="hint" id="patternHint">Every log line clustered by message template — identifiers, hashes, quoted strings and measurements are masked, then identical templates counted. Click a pattern to see its logs.</div>
+        <div style="overflow-x:auto"><table id="patternTable"></table></div>
+      </div>
+    </section>
+
+    <!-- SERVICES -->
+    <section class="view" id="view-services">
+      <h2>Services</h2>
+      <div class="lede">Health broken down per workload. Click any service to inspect its logs.</div>
+      <div class="grid g2" id="serviceCards"></div>
+    </section>
+
+    <!-- SETUP -->
+    <section class="view" id="view-setup">
+      <h2>Setup</h2>
+      <div class="lede">What is feeding this dashboard, and how fresh each tier is.</div>
+      <div class="grid g2" id="setupTop"></div>
+      <div class="card" style="margin-top:14px">
+        <h3>Latency tiers</h3>
+        <div class="hint">Cloud Monitoring lags by minutes and billing by about a day. Pretending otherwise would make the dashboard lie, so every panel is labelled with its tier.</div>
+        <div id="tierList"></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h3>Collectors</h3>
+        <div id="collectorList"></div>
+      </div>
+    </section>
+
     <!-- INCIDENTS -->
     <section class="view" id="view-incidents">
       <h2>Incidents</h2>
-      <div class="lede">An alert becomes an incident with a timeline, evidence, a suspected root cause, and <strong>two</strong> impact numbers: cloud cost and revenue at risk.</div>
-      <div id="rootCauseBanner"></div>
-      <div id="incList"></div>
+      <div class="lede">Thresholds crossed, grouped by cause, with the fix. Expand one for its impact, suspected root cause, top errors, a sample trace and an explanation.</div>
+
+      <div class="grid g4" id="incTiles"></div>
+      <div class="legend" id="incLegend"></div>
+      <div id="rootCauseBanner" style="margin-top:16px"></div>
+
+      <div class="card" style="margin-top:14px">
+        <h3>Breaching now</h3>
+        <div class="hint">Conditions currently outside their threshold. These need someone.</div>
+        <div id="incBreaching"></div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <h3>Resolved in this window</h3>
+        <div class="hint">Stopped breaching on their own. Worth a look, not an interruption.</div>
+        <div id="incResolved"></div>
+      </div>
     </section>
   </main>
+</div>
+
+<div class="notif-panel" id="notifPanel" hidden>
+  <div class="notif-head">
+    <strong>Notifications</strong>
+    <span class="faint" style="font-size:11.5px" id="notifNote"></span>
+  </div>
+  <div id="notifList"></div>
 </div>
 
 <div class="drawer-bg" id="drawerBg"></div>

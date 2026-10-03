@@ -51,6 +51,15 @@ class Settings:
         )
         self.region: str = _env("GCP_REGION", "asia-south1")
 
+        # The project currently being viewed. Starts as the deployment's own
+        # project and can be switched at runtime from the project picker --
+        # OpsMind watches one project at a time, and switching re-points the
+        # collectors rather than keeping several working sets in memory.
+        self.active_project: str = self.project_id
+        # Shown in the "grant this role" hints on the picker. Purely cosmetic:
+        # nothing authenticates with it.
+        self.service_account_hint: str = _env("SERVICE_ACCOUNT_EMAIL", "")
+
         # Cloud Run service names the platform observes. CogniKart's four
         # services plus the platform itself -- the platform monitoring its own
         # log volume is both a demo beat and a billing safety net.
@@ -122,10 +131,22 @@ class Settings:
             service, {"vcpu": 1.0, "memoryGib": 0.5, "maxInstances": 5}
         )
 
+    def set_active_project(self, project_id: str) -> str:
+        """Point OpsMind at a different project.
+
+        Callers are responsible for clearing the working set and resetting the
+        collectors' cursors: the buffered entries belong to the project we are
+        leaving, and showing them under a different project's name would be a
+        lie that is very hard to spot.
+        """
+        self.active_project = (project_id or "").strip() or self.project_id
+        return self.active_project
+
     def as_dict(self) -> Dict[str, object]:
         return {
             "dataSource": self.data_source,
             "projectId": self.project_id or None,
+            "activeProject": self.active_project or None,
             "region": self.region,
             "watchedServices": self.watched_services,
             "billingModel": self.billing_model,

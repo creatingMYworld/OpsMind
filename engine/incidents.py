@@ -46,6 +46,7 @@ class Incident:
         self.startedAt = time.time()
         self.lastSeenAt = self.startedAt
         self.resolvedAt: Optional[float] = None
+        self.episode = 1          # which firing this is for its scope
         self.triggers: Dict[str, Dict[str, Any]] = {}
         self.timeline: List[Dict[str, Any]] = []
         self.peakObserved: Dict[str, float] = {}
@@ -136,7 +137,9 @@ class Incident:
             "lastSeenAt": self.lastSeenAt,
             "resolvedAt": self.resolvedAt,
             "durationS": round(duration, 1),
+            "episode": self.episode,
             "title": self.title(),
+            "summary": self.summary(),
             "triggers": list(self.triggers.values()),
             "triggerCount": len(self.triggers),
             "peakObserved": {k: round(v, 4) for k, v in self.peakObserved.items()},
@@ -145,6 +148,27 @@ class Incident:
         if store is not None:
             d["impact"] = self.impact(store)
         return d
+
+    def summary(self) -> str:
+        """One line a reader can act on: what crossed, by how much.
+
+        The title names the condition; this names the number. Together they
+        answer "what is wrong" without opening anything.
+        """
+        if not self.triggers:
+            return "A threshold was crossed."
+        t = max(self.triggers.values(),
+                key=lambda x: _SEVERITY_ORDER.get(self.severity, 0))
+        unit = t.get("unit") or ""
+        comparator = "exceeds" if t.get("comparator") == "gt" else "is below"
+        observed, threshold = t.get("observed"), t.get("threshold")
+        if unit == "ratio":
+            return "%s is %.1f%%, which %s the %.0f%% threshold" % (
+                t.get("ruleName", "The metric"), (observed or 0) * 100,
+                comparator, (threshold or 0) * 100)
+        return "%s of %s%s %s the %s%s threshold" % (
+            t.get("ruleName", "The metric"), _fmt(observed), unit,
+            comparator, _fmt(threshold), unit)
 
     def title(self) -> str:
         names = [t["ruleName"] for t in self.triggers.values()]
@@ -193,6 +217,10 @@ class IncidentManager:
         self._open: Dict[str, Incident] = {}        # scopeKey -> incident
         self._all: Dict[str, Incident] = {}         # id -> incident
         self._history: List[str] = []
+        # A threshold crossed four times in an hour is one thing to fix, not
+        # four things to read. Episodes are counted per scope so the UI can
+        # group them and say so.
+        self._episodes: Dict[str, int] = {}
 
     def ingest(self, breaches: List[Breach], clear_required: int = 3) -> Dict[str, Any]:
         seen_scopes = set()
@@ -211,6 +239,8 @@ class IncidentManager:
                 inc.scopeKey = scope
                 inc.isGlobal = scope.startswith("__all__")
                 inc.service = None if inc.isGlobal else b.scopeKey
+                self._episodes[scope] = self._episodes.get(scope, 0) + 1
+                inc.episode = self._episodes[scope]
                 self._open[scope] = inc
                 self._all[inc.id] = inc
                 self._history.append(inc.id)
@@ -242,6 +272,111 @@ class IncidentManager:
 
     def get(self, incident_id: str) -> Optional[Incident]:
         return self._all.get(incident_id)
+
+    def grouped(self, store, window_minutes: int = 360) -> Dict[str, Any]:
+        """Incidents rolled up by scope, split into breaching and resolved.
+
+        The page a responder actually wants answers three questions in order:
+        what is wrong right now, what stopped by itself, and how often has this
+        been happening. Listing every episode separately answers none of them.
+        """
+        cutoff = time.time() - window_minutes * 60
+        by_scope: Dict[str, List[Incident]] = {}
+        for inc in self._all.values():
+            if inc.lastSeenAt < cutoff and inc.status != STATUS_OPEN:
+                continue
+            by_scope.setdefault(inc.scopeKey, []).append(inc)
+
+        breaching: List[Dict[str, Any]] = []
+        resolved: List[Dict[str, Any]] = []
+        total_episodes = 0
+
+        for scope, incs in by_scope.items():
+            incs.sort(key=lambda i: i.startedAt)
+            latest = incs[-1]
+            firing = any(i.status == STATUS_OPEN for i in incs)
+            total_episodes += len(incs)
+
+            # "Breaching for" is time actually spent outside the threshold;
+            # "across" is the span from the first episode to the last. They
+            # differ whenever a condition has flapped, and the difference is
+            # the useful part.
+            breaching_s = sum((i.resolvedAt or time.time()) - i.startedAt for i in incs)
+            across_s = (latest.resolvedAt or time.time()) - incs[0].startedAt
+
+            severity = max((i.severity for i in incs),
+                           key=lambda s: _SEVERITY_ORDER.get(s, 0))
+            window = max((t.get("windowMinutes") or 0)
+                         for i in incs for t in [{}] + list(i.triggers.values())) or None
+            rule_windows = [t.get("windowMinutes") for i in incs
+                            for t in i.triggers.values() if t.get("windowMinutes")]
+
+            group = {
+                "key": scope,
+                "title": latest.title(),
+                "summary": latest.summary(),
+                "severity": severity,
+                "status": "BREACHING" if firing else "RESOLVED",
+                "episodes": len(incs),
+                "service": latest.service,
+                "category": latest.category,
+                "breachingForS": round(breaching_s, 1),
+                "acrossS": round(across_s, 1),
+                "matchingEntries": self._matching_entries(store, latest, incs[0].startedAt),
+                "ruleWindowMinutes": min(rule_windows) if rule_windows else None,
+                "startedAt": incs[0].startedAt,
+                "lastSeenAt": latest.lastSeenAt,
+                "resolvedAt": latest.resolvedAt,
+                "primaryIncidentId": latest.id,
+                "incidentIds": [i.id for i in incs],
+                "conditions": sorted({t.get("ruleName", "?")
+                                      for i in incs for t in i.triggers.values()}),
+                "sparkline": self._sparkline(store, incs),
+            }
+            (breaching if firing else resolved).append(group)
+
+        breaching.sort(key=lambda g: (-_SEVERITY_ORDER.get(g["severity"], 0),
+                                      -g["breachingForS"]))
+        resolved.sort(key=lambda g: -(g["resolvedAt"] or 0))
+
+        return {
+            "windowMinutes": window_minutes,
+            "stats": {
+                "breachingNow": len(breaching),
+                "resolvedInWindow": len(resolved),
+                "totalEpisodes": total_episodes,
+                "distinctIncidents": len(by_scope),
+                "critical": sum(1 for g in breaching + resolved
+                                if g["severity"] in ("CRITICAL", "HIGH")),
+            },
+            "breaching": breaching,
+            "resolved": resolved,
+            "openCount": len(self._open),
+        }
+
+    @staticmethod
+    def _matching_entries(store, incident: Incident, since: float) -> int:
+        """How many log entries the rule's condition actually matched.
+
+        Counting the evidence, not the alerts: a threshold crossing backed by
+        three entries and one backed by three hundred are different problems.
+        """
+        services = [incident.service] if incident.service else None
+        page = store.logs(limit=4000, min_severity="WARNING",
+                          services=services, since=since)
+        return page["total"]
+
+    @staticmethod
+    def _sparkline(store, incs: List[Incident], buckets: int = 24) -> List[float]:
+        """Error rate per minute over the group's span, normalised 0-1."""
+        start = incs[0].startedAt
+        rows = store.series(window_minutes=max(2, int((time.time() - start) / 60) + 2),
+                            service=incs[-1].service)
+        vals = [float(r.get("errors5xx", 0) or 0) for r in rows][-buckets:]
+        if not vals:
+            return []
+        peak = max(vals) or 1.0
+        return [round(v / peak, 3) for v in vals]
 
     def correlate(self, incident: Incident, store,
                   window_s: float = 180.0) -> Dict[str, Any]:
