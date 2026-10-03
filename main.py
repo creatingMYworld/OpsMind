@@ -23,6 +23,7 @@ import asyncio
 import hashlib
 import json
 import os
+import secrets
 import time
 from typing import Any, Dict, List, Optional
 
@@ -61,31 +62,65 @@ _started_at = time.time()
 
 
 # --- auth -----------------------------------------------------------------
-def _check_token(request: Request) -> None:
-    """Optional shared-secret gate.
+# OpsMind can read your project's logs, so a public URL without a token would
+# expose them. Two things are deliberately NOT gated:
+#
+#   /static/*   the dashboard's own HTML, CSS and JavaScript. It is program
+#               code, not data, and gating it breaks the page it belongs to --
+#               the browser fetches those URLs without the query string the
+#               token arrived on, so every asset 401s and the page renders
+#               unstyled and inert.
+#   /healthz    Cloud Run's liveness checks, which carry no credentials.
+#
+# A token presented once in the query string is exchanged for a cookie, so the
+# page's own API calls authenticate without the token travelling in every URL.
+TOKEN_COOKIE = "opsmind_token"
+_OPEN_PATHS = ("/healthz", "/readyz", "/internal/ingest", "/favicon.ico")
+_OPEN_PREFIXES = ("/static/",)
 
-    OpsMind holds read access to your project's logs, so a public URL without
-    a token would expose them. When DASHBOARD_TOKEN is unset the portal is
-    open, which is fine locally and called out in docs/DEPLOY.md.
-    """
-    if not settings.dashboard_token:
-        return
-    supplied = (request.headers.get("x-opsmind-token")
-                or request.query_params.get("token", ""))
-    if supplied != settings.dashboard_token:
-        raise HTTPException(status_code=401, detail="invalid or missing token")
+
+def _supplied_token(request: Request) -> str:
+    return (request.headers.get("x-opsmind-token")
+            or request.query_params.get("token", "")
+            or request.cookies.get(TOKEN_COOKIE, ""))
 
 
 @app.middleware("http")
 async def guard(request: Request, call_next):
-    open_paths = ("/healthz", "/readyz", "/internal/ingest", "/favicon.ico")
-    if settings.dashboard_token and not request.url.path.startswith(open_paths):
-        try:
-            _check_token(request)
-        except HTTPException as exc:
-            return JSONResponse(status_code=exc.status_code,
-                                content={"error": exc.detail})
-    return await call_next(request)
+    if not settings.dashboard_token:
+        return await call_next(request)
+
+    path = request.url.path
+    if path in _OPEN_PATHS or path.startswith(_OPEN_PREFIXES):
+        return await call_next(request)
+
+    supplied = _supplied_token(request)
+    if not secrets.compare_digest(supplied, settings.dashboard_token):
+        # An unauthenticated page request should land somewhere a person can
+        # act on, not a JSON error they cannot read.
+        if request.headers.get("accept", "").startswith("text/html"):
+            return HTMLResponse(
+                "<!doctype html><meta charset=utf-8>"
+                "<title>OpsMind</title>"
+                "<body style=\"font:16px/1.6 system-ui;background:#1a0b2e;"
+                "color:#ede9fe;display:grid;place-items:center;height:100vh;"
+                "margin:0;text-align:center\">"
+                "<div><h1 style=\"margin:0 0 10px\">OpsMind</h1>"
+                "<p style=\"color:#c9bfe4\">This dashboard needs an access token.<br>"
+                "Open it as <code>?token=YOUR_TOKEN</code>.</p></div>",
+                status_code=401)
+        return JSONResponse(status_code=401,
+                            content={"error": "invalid or missing token"})
+
+    response = await call_next(request)
+    # Exchange a query-string token for a cookie, so the page's own fetches
+    # are authenticated and the token stops appearing in every URL.
+    if request.query_params.get("token") and not request.cookies.get(TOKEN_COOKIE):
+        proto = request.headers.get("x-forwarded-proto", "") or request.url.scheme
+        response.set_cookie(
+            TOKEN_COOKIE, settings.dashboard_token, httponly=True,
+            samesite="lax", secure=(proto == "https"), max_age=12 * 3600, path="/")
+    return response
 
 
 # --- lifecycle ------------------------------------------------------------

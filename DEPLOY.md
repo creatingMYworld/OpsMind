@@ -302,7 +302,8 @@ depends on an API call succeeding.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| 401 from every endpoint | Missing token | Append `?token=...` to the URL |
+| 401 from every endpoint | Missing token | Append `?token=...` to the URL. It is exchanged for a cookie, so you only need it once |
+| Page loads as plain unstyled text | Stale build where the token gate also blocked `/static` | Redeploy. Assets are deliberately not gated: they are program code, not data |
 | Dashboard loads, no logs | `DATA_SOURCE` not `gcp` | Check `/api/v1/meta`; redeploy with it set |
 | `lastError` mentions permission | IAM not propagated, or role missing | Wait 60s; re-check Part 4 |
 | Logs appear but no services listed | `WATCHED_SERVICES` used commas | Redeploy with **semicolons** |
