@@ -630,7 +630,7 @@ function renderActions(q) {
   const pill = $("#actionCount");
   pill.className = n ? "pill info explain-pill" : "pill ok";
   pill.innerHTML = n
-    ? `<span aria-hidden="true">✦</span> ${ai ? "AI explanation · Gemini on Vertex AI" : "Explanation available"}`
+    ? `<span aria-hidden="true">✦</span> ${ai ? "Gemini" : "Explain"}`
     : "all clear";
   pill.title = n
     ? (ai ? `Open an incident and press Explain. Powered by ${state.meta.config.aiModel || "Gemini"} on Vertex AI, checked against the incident's own numbers.`
@@ -711,6 +711,12 @@ const ICONS = {
   funnel: '<path d="M3 4h18l-7 8.5V19l-4 2v-8.5Z"/>',
   alert: '<path d="m10.3 3.9-8.2 14A2 2 0 0 0 3.8 21h16.4a2 2 0 0 0 1.7-3.1l-8.2-14a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/>',
   bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9Z"/>',
+  cloud: '<path d="M17.5 19a4.5 4.5 0 1 0-1.3-8.8A6 6 0 1 0 6 18h11.5"/>',
+  pin: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/>',
+  layers: '<path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+  sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z"/>',
+  scroll: '<path d="M8 21h11a2 2 0 0 0 2-2v-1H10v1a2 2 0 1 1-4 0V5a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2h4"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/>',
+  cpu: '<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
   tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.5"/>'
 };
 const TINT = { ok: "--ok", warn: "--warn", err: "--err", crit: "--crit", cost: "--cost", accent: "--accent", info: "--info", money: "--money" };
@@ -1039,14 +1045,10 @@ function alignTo(base, rows, key) {
 /* ---------- projects ---------- */
 async function loadProjects() {
   const d = await api("/api/v1/projects");
-  $("#projLede").textContent = d.note || "";
 
   $("#projError").innerHTML = d.error
-    ? `<div class="notice bad" style="margin-bottom:14px">
-         <strong>Cannot list projects.</strong>
-         <div style="margin-top:5px">${esc(d.error)}</div>
-         ${d.howToFix ? `<div class="mono" style="margin-top:9px;font-size:11.5px">${esc(d.howToFix)}</div>` : ""}
-       </div>` : "";
+    ? `<div class="notice bad" style="margin-bottom:12px"><strong>Cannot list projects.</strong> ${esc(d.error)}
+         ${d.howToFix ? `<div class="mono" style="margin-top:6px;font-size:11.5px">${esc(d.howToFix)}</div>` : ""}</div>` : "";
 
   if (!d.projects.length) {
     $("#projGrid").innerHTML = `<div class="empty">No projects visible to this service account.</div>`;
@@ -1055,38 +1057,42 @@ async function loadProjects() {
 
   $("#projGrid").innerHTML = d.projects.map(p => {
     const state = p.connected === true ? "ok" : p.connected === false ? "err" : "muted";
-    const label = p.connected === true ? "connected"
-                : p.connected === false ? "no log access" : "not checked";
-    return `<div class="card" style="${p.active ? "border-color:var(--accent)" : ""}">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <strong style="font-size:15px">${esc(p.displayName)}</strong>
-        ${p.active ? `<span class="pill info"><span class="dot"></span>viewing</span>` : ""}
+    const label = p.connected === true ? "Connected" : p.connected === false ? "No log access" : "Not checked";
+    return `<div class="card proj-tile${p.active ? " active" : ""}">
+      <div class="proj-top">
+        ${ico("cloud", "accent")}
+        <div class="proj-id">
+          <div class="proj-name">${esc(p.displayName)}</div>
+          <div class="mono faint">${esc(p.projectId)}</div>
+        </div>
+        ${p.active ? `<span class="pill info">Viewing</span>` : ""}
       </div>
-      <div class="mono faint" style="font-size:11.5px;margin-top:3px">${esc(p.projectId)}</div>
-      <div style="margin-top:11px"><span class="pill ${state}"><span class="dot"></span>${label}</span></div>
-      <div class="faint" style="font-size:12px;margin-top:8px;min-height:2.6em">${esc(p.reason || p.note || "Access not yet checked.")}</div>
-      <div style="display:flex;gap:8px;margin-top:12px">
+      <div class="proj-status"><span class="pill ${state}"><span class="dot"></span>${label}</span></div>
+      <div class="fixhint faint mono"></div>
+      <div class="proj-actions">
         <button class="btn" data-check="${esc(p.projectId)}">Check access</button>
-        <button class="btn primary" data-open="${esc(p.projectId)}" ${p.active ? "disabled" : ""}>
-          ${p.active ? "Open" : "Open"}</button>
+        <button class="btn primary" data-open="${esc(p.projectId)}" data-active="${p.active ? 1 : 0}">Open</button>
       </div>
-      <div class="fixhint faint mono" style="font-size:11px;margin-top:9px"></div>
     </div>`;
   }).join("");
 
   $$("#projGrid [data-check]").forEach(b => b.addEventListener("click", async () => {
     b.disabled = true; b.textContent = "Checking…";
-    const r = await api(`/api/v1/projects/${encodeURIComponent(b.dataset.check)}/access?force=true`);
     const card = b.closest(".card");
-    card.querySelector(".pill").className = "pill " + (r.connected ? "ok" : "err");
-    card.querySelector(".pill").innerHTML =
-      `<span class="dot"></span>${r.connected ? "connected" : "no log access"}`;
-    card.querySelectorAll(".faint")[1].textContent = r.reason || "";
-    if (r.howToFix) card.querySelector(".fixhint").textContent = r.howToFix;
+    try {
+      const r = await api(`/api/v1/projects/${encodeURIComponent(b.dataset.check)}/access?force=true`);
+      const pill = card.querySelector(".proj-status .pill");
+      pill.className = "pill " + (r.connected ? "ok" : "err");
+      pill.innerHTML = `<span class="dot"></span>${r.connected ? "Connected" : "No log access"}`;
+      card.querySelector(".fixhint").textContent = r.connected ? "" : (r.howToFix || r.reason || "");
+    } catch (e) {
+      card.querySelector(".fixhint").textContent = "Check failed: " + e.message;
+    }
     b.disabled = false; b.textContent = "Check access";
   }));
 
   $$("#projGrid [data-open]").forEach(b => b.addEventListener("click", async () => {
+    if (b.dataset.active === "1") { go("overview"); return; }
     b.disabled = true; b.innerHTML = '<span class="spin"></span>';
     try {
       // Switching clears the working set on purpose: the buffered entries
@@ -1192,56 +1198,43 @@ async function loadServices() {
 /* ---------- setup ---------- */
 async function loadSetup() {
   const m = state.meta || await api("/api/v1/meta");
-  const c = m.config;
-  $("#setupTop").innerHTML = `
-    <div class="card">
-      <h3>Source</h3>
-      <div class="hint">Where this dashboard's data comes from.</div>
-      <dl class="kv">
-        <dt>Mode</dt><dd><span class="pill ${c.dataSource === "gcp" ? "ok" : "info"}"><span class="dot"></span>${esc(c.dataSource)}</span></dd>
-        <dt>Project</dt><dd>${esc(c.projectId || "— (local mode)")}</dd>
-        <dt>Region</dt><dd>${esc(c.region)}</dd>
-        <dt>Watching</dt><dd>${(c.watchedServices || []).map(x => esc(x)).join("<br>")}</dd>
-        <dt>Billing model</dt><dd>${esc(c.billingModel)}</dd>
-        <dt>Pricing verified</dt><dd>${esc(c.pricingVerifiedOn || "—")}</dd>
-        <dt>AI explanation</dt><dd>${c.aiEnabled ? esc(c.aiModel) : "disabled (deterministic narrative)"}</dd>
-      </dl>
-    </div>
-    <div class="card">
-      <h3>Working set</h3>
-      <div class="hint">OpsMind keeps a bounded in-memory view. Cloud Logging is the durable store; this is not a copy of it.</div>
-      <dl class="kv">
-        <dt>Buffered entries</dt><dd>${nf(m.store.bufferedEntries)} / ${nf(m.store.bufferCapacity)}</dd>
-        <dt>Minute buckets</dt><dd>${nf(m.store.minuteBuckets)}</dd>
-        <dt>Error groups</dt><dd>${nf(m.store.errorGroups)}</dd>
-        <dt>Ingested total</dt><dd>${nf(m.store.ingestedTotal)}</dd>
-        <dt>Duplicates dropped</dt><dd>${nf(m.store.droppedDuplicates)}</dd>
-        <dt>Last ingest</dt><dd>${m.store.lastIngestAgeS === null ? "—" : nf(m.store.lastIngestAgeS, 1) + "s ago"}</dd>
-        <dt>Uptime</dt><dd>${dur(m.uptimeS)}</dd>
-      </dl>
-      ${(m.ruleWarnings || []).length
-        ? `<div class="notice" style="margin-top:10px;color:var(--err)">${m.ruleWarnings.length} alert rule(s) reference a metric the store does not produce and can never fire.</div>`
-        : `<div class="faint" style="font-size:11.5px;margin-top:10px">Every alert rule resolves to a real metric.</div>`}
-    </div>`;
+  const c = m.config, col = m.collectors || {};
+  const gcp = c.dataSource === "gcp";
+  const logsOn = col.logs && col.logs.running;
+  const pill = (ok, on, off) => `<span class="pill ${ok ? "ok" : "muted"}"><span class="dot"></span>${ok ? on : off}</span>`;
+  const tile = (icon, tint, label, value, sub) => `<div class="card setup-tile">
+      <div class="tile-head">${ico(icon, tint)}<div class="label">${label}</div></div>
+      <div class="setup-value">${value}</div><div class="setup-sub">${sub}</div></div>`;
 
-  $("#tierList").innerHTML = m.tiers.map(t => `
-    <div style="margin-bottom:12px">
-      <div style="display:flex;align-items:center;gap:9px">
-        <span class="tier ${t.tier === "LIVE" ? "live" : t.tier === "NEAR_REAL_TIME" ? "near" : "auth"}">${esc(t.tier.replace(/_/g, " "))}</span>
-        <strong style="font-size:13px">${esc(t.latency)}</strong>
-        <span class="faint" style="font-size:12px">${esc(t.source)}</span>
-      </div>
-      <div class="faint" style="font-size:12px;margin-top:3px">${esc(t.carries)}</div>
+  $("#setupConn").innerHTML = [
+    tile("cloud", "accent", "Platform", gcp ? "Google Cloud" : "Local ingest", pill(logsOn, "Connected", "Not connected")),
+    tile("tag", "info", "Project", esc(c.activeProject || c.projectId || "local"), `<span class="faint">${gcp ? "Cloud Logging" : "direct ingest"}</span>`),
+    tile("pin", "warn", "Region", esc(c.region || "—"), `<span class="faint">application region</span>`),
+    tile("layers", "ok", "Application", esc(m.observes || "—"), `<span class="faint">${nf((c.watchedServices || []).length)} services watched</span>`),
+  ].join("");
+
+  // What each Google Cloud service does for OpsMind, and whether it is on.
+  const svc = [
+    ["scroll", "accent", "Cloud Logging", "Logs and errors", gcp ? logsOn : false, gcp ? "Live" : "Local mode"],
+    ["cpu", "info", "Cloud Monitoring", "CPU, memory, instances", gcp, gcp ? "Live" : "Local mode"],
+    ["layers", "ok", "Cloud Run", "Hosts the application", true, "In use"],
+    ["sparkles", "cost", "Vertex AI · Gemini", "Incident explanations", !!c.aiEnabled, c.aiEnabled ? (c.aiModel || "On") : "Off"],
+    ["coins", "money", "Cloud Billing pricing", "Modeled spend", true, c.pricingVerifiedOn ? "Prices " + c.pricingVerifiedOn : "In use"],
+    ["nodes", "warn", "Resource Manager", "Project discovery", gcp, gcp ? "In use" : "Local mode"],
+  ];
+  $("#setupServices").innerHTML = svc.map(([icon, tint, name, what, on, state]) => `
+    <div class="card setup-svc">
+      ${ico(icon, tint)}
+      <div class="setup-svc-text"><div class="setup-svc-name">${name}</div><div class="faint">${what}</div></div>
+      <span class="pill ${on ? "ok" : "muted"}"><span class="dot"></span>${esc(state)}</span>
     </div>`).join("");
 
-  $("#collectorList").innerHTML = Object.entries(m.collectors).map(([k, v]) => `
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border-soft);font-size:12.5px">
-      <span><strong>${esc(k)}</strong> <span class="faint">${esc(v.collector || "")}</span></span>
-      <span style="display:flex;gap:8px;align-items:center">
-        ${v.lastError ? `<span class="pill err" title="${esc(v.lastError)}">error</span>` : `<span class="pill ${v.running ? "ok" : "muted"}"><span class="dot"></span>${v.running ? "running" : "idle"}</span>`}
-        ${v.lastPollAgeS !== undefined && v.lastPollAgeS !== null ? `<span class="faint">${nf(v.lastPollAgeS, 0)}s ago</span>` : ""}
-      </span>
-    </div>`).join("");
+  const watched = c.watchedServices || [];
+  $("#setupAppTitle").textContent = `${m.observes || "Application"} services`;
+  $("#setupApp").innerHTML = watched.length
+    ? watched.map(n => `<a class="card setup-app" href="${buildHash("resources", { service: n })}">
+        <span class="mono">${esc(svcShort(n))}</span><span class="faint mono">${esc(n)}</span></a>`).join("")
+    : `<div class="empty">No services configured.</div>`;
 }
 
 /* ---------- cost ---------- */

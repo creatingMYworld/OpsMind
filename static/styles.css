@@ -672,3 +672,30 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
   opacity: 0; transform: translateY(6px); transition: opacity .18s, transform .18s; pointer-events: none;
 }
 #toast.show { opacity: 1; transform: none; }
+
+
+/* ---------- minimal explain pill ---------- */
+.explain-pill { height: 20px; padding: 0 7px; font-size: 10.5px; gap: 4px; }
+
+/* ---------- setup ---------- */
+#setupConn { margin-top: 2px; }
+.setup-value { font-size: 19px; font-weight: 650; letter-spacing: -.3px; margin: 12px 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-sub { font-size: 12px; }
+.proj-tile { display: flex; flex-direction: column; gap: 12px; }
+.proj-tile.active { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.proj-top { display: flex; align-items: center; gap: 10px; }
+.proj-id { min-width: 0; flex: 1; }
+.proj-name { font-weight: 650; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-id .mono { font-size: 11.5px; }
+.proj-tile .fixhint { font-size: 11px; }
+.proj-tile .fixhint:empty { display: none; }
+.proj-actions { display: flex; gap: 8px; margin-top: auto; }
+.proj-actions .btn { flex: 1; }
+.setup-svc { display: flex; align-items: center; gap: 12px; }
+.setup-svc-text { flex: 1; min-width: 0; }
+.setup-svc-name { font-weight: 600; font-size: 13.5px; }
+.setup-svc-text .faint { font-size: 12px; }
+.setup-app { display: flex; flex-direction: column; gap: 3px; color: var(--text); }
+.setup-app .mono:first-child { font-size: 14px; font-weight: 600; }
+.setup-app .faint { font-size: 11px; }
+.setup-app:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }

@@ -555,6 +555,13 @@ def projects(refresh: bool = False) -> Dict[str, Any]:
 def project_access(project_id: str, force: bool = False) -> Dict[str, Any]:
     """Probe whether this project's logs are readable: one tiny Cloud Logging
     call, which is more conclusive than inferring it from an IAM policy."""
+    # Local mode has one pseudo-project fed by direct ingest. It is not a
+    # Google Cloud project, so probing Cloud Logging for it can only fail and
+    # would tell the user to grant IAM on a project that does not exist.
+    if settings.data_source != "gcp" and project_id == "local":
+        return {"projectId": "local", "at": time.time(), "connected": True,
+                "hasRecentLogs": store.stats().get("bufferedEntries", 0) > 0,
+                "reason": "Receiving logs by direct ingest.", "howToFix": None}
     from .collectors.gcp_projects import directory
     return directory.check_access(project_id, force=force)
 
