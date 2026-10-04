@@ -911,3 +911,18 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
 .rec-card[open] .rec-more::after { transform: rotate(180deg); }
 .rec-card[open] summary { margin-bottom: 10px; }
 .opt-recs { align-items: start; }
+
+/* The drawer header stays above scrolled content: timeline dots and other
+   positioned children were painting over it. */
+.drawer-head { z-index: 3; }
+
+/* Native dropdown lists follow the theme instead of the OS default. */
+:root { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+.fsel select option, .tb-window select option, .tb-project select option { color: var(--text); background: var(--bg-elev2); }
+.tb-project, .tb-window, .fsel { cursor: pointer; user-select: none; }
+
+/* Incident explanation: one labelled block per heading. */
+.narr { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.narr-blk p { margin: 4px 0 0; font-size: 13px; line-height: 1.65; color: var(--text); }
+.narr .ev-k { text-transform: uppercase; }

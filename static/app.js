@@ -1929,7 +1929,7 @@ function wireExplain(root, id) {
           ${r.cached ? `<span class="pill muted">cached</span>` : ""}
         </div>
         ${r.fallbackUsed ? `<div class="faint" style="font-size:11.5px;margin-bottom:8px">Deterministic narrative (${esc(r.fallbackReason)}). Built from the same evidence bundle.</div>` : ""}
-        <pre class="json" style="white-space:pre-wrap;color:var(--text)">${esc(r.narrative)}</pre>
+        ${narrativeHtml(r.narrative)}
         <div class="faint" style="font-size:11px">${esc(g.method)}</div>`;
     } catch (e) {
       out.innerHTML = `<div class="faint">Explanation failed: ${esc(e.message)}</div>`;
@@ -1937,6 +1937,34 @@ function wireExplain(root, id) {
     btn.disabled = false;
   });
 }
+
+/* The narrative arrives as plain text under fixed upper-case headings
+   (WHAT HAPPENED, EVIDENCE, ...). Render each as a labelled block in body
+   type instead of one monospace slab. */
+function narrativeHtml(text) {
+  const blocks = [];
+  String(text || "").split(/\r?\n/).forEach(line => {
+    const t = line.trim().replace(/^#+\s*|\*\*/g, "");
+    if (!t) return;
+    if (/^[A-Z][A-Z \/&-]{2,}:?$/.test(t)) { blocks.push({ head: t.replace(/:$/, ""), body: [] }); return; }
+    if (!blocks.length) blocks.push({ head: "", body: [] });
+    blocks[blocks.length - 1].body.push(t);
+  });
+  return `<div class="narr">${blocks.map(b => `<div class="narr-blk">
+    ${b.head ? `<div class="ev-k">${esc(b.head.toLowerCase())}</div>` : ""}
+    <p>${esc(b.body.join(" "))}</p></div>`).join("")}</div>`;
+}
+
+/* A dropdown is a pill (a <label>) around a native <select>. Only the value
+   text used to open it; a click anywhere on the pill now does. */
+document.addEventListener("click", e => {
+  const pill = e.target.closest(".tb-project, .tb-window, .fsel");
+  if (!pill || e.target.tagName === "SELECT") return;
+  const sel = pill.querySelector("select");
+  if (!sel || sel.disabled) return;
+  e.preventDefault();
+  try { sel.showPicker(); } catch { sel.focus(); }
+});
 
 /* Opened from the action queue, which links to a specific incident. */
 async function showIncident(id) {
