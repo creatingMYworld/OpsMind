@@ -1004,6 +1004,10 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
   box-shadow: var(--shadow); cursor: pointer;
 }
 .guide-fab:hover { filter: brightness(1.12); }
+/* `display: flex` below outranks the browser default `[hidden] {display:none}`,
+   so without this rule the panel is visible on every page load and the close
+   button cannot hide it. Keep the two together. */
+.guide-panel[hidden] { display: none; }
 .guide-panel {
   position: fixed; right: 22px; bottom: 80px; z-index: 66;
   width: min(430px, 92vw); max-height: min(620px, 76vh);
