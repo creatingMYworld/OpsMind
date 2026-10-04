@@ -12,7 +12,7 @@ redesign.
 |---|---|---|
 | Landing | `/` | `static/landing.html`, `landing.css`, `landing.js` |
 | How it works | `/how-it-works` | `static/how-it-works.html` (four steps, video slot) |
-| About | `/about` | `static/about.html` (team cards are placeholders) |
+| About | `/about` | `static/about.html` (Team CogniveX, six members) |
 | Dashboard | `/app#<view>` | `static/index.html`, `app.js`, `styles.css` |
 
 Dashboard views: `overview`, `incidents`, `insights`, `services`,
