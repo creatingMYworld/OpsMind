@@ -187,6 +187,73 @@ function setHealthPill(h) {
   return cls;   // the hero tile is coloured to match
 }
 
+/* ---------- overview: key numbers ----------
+   Four tiles, each a link to the page that explains it: the number, a
+   sparkline of the same quantity across the window, and how the second half
+   of the window compares with the first. */
+function sparkline(values, color) {
+  const v = values.filter(x => Number.isFinite(x));
+  if (v.length < 2) return "";
+  const w = 84, h = 26, max = Math.max(...v), min = Math.min(...v), span = max - min || 1;
+  const d = v.map((x, i) => `${i ? "L" : "M"}${(i / (v.length - 1) * w).toFixed(1)},${(h - 2 - (x - min) / span * (h - 4)).toFixed(1)}`).join(" ");
+  return `<svg class="kspark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">` +
+    `<path d="${d}" fill="none" stroke="var(${color})" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+function halves(values) {
+  const v = values.filter(x => Number.isFinite(x));
+  if (v.length < 4) return null;
+  const mid = Math.floor(v.length / 2);
+  const avg = a => a.reduce((s, x) => s + x, 0) / a.length;
+  return { first: avg(v.slice(0, mid)), second: avg(v.slice(mid)) };
+}
+function kTile({ label, value, valueColor, spark, sparkColor, delta, href }) {
+  return `<a class="card ktile" href="${href}">
+    <div class="ktile-label">${esc(label)}<span class="ktile-go" aria-hidden="true">→</span></div>
+    <div class="ktile-row">
+      <div class="ktile-value"${valueColor ? ` style="color:var(${valueColor})"` : ""}>${value}</div>
+      ${sparkline(spark, sparkColor)}
+    </div>
+    <div class="ktile-foot">${delta}</div>
+  </a>`;
+}
+/* "↑ 12% vs first half". goodWhenUp decides green vs red. */
+function deltaLine(h, goodWhenUp, fmt) {
+  if (!h) return `<span class="faint">not enough data for a trend</span>`;
+  const diff = h.second - h.first;
+  if (Math.abs(diff) < 1e-9) return `<span class="faint">→ flat vs first half</span>`;
+  const up = diff > 0, good = up === goodWhenUp;
+  return `<span style="color:var(${good ? "--ok" : "--err"})">${up ? "↑" : "↓"}</span> ${fmt(Math.abs(diff))} vs first half`;
+}
+function renderKeyNumbers({ t, c, o, points, costSeries, incs }) {
+  const req = points.map(p => p.requests);
+  const errRate = points.map(p => p.requests ? (p.errors5xx / p.requests) * 100 : 0);
+  const spend = costSeries.map(p => Object.values(p.usdPerHour || {}).reduce((s, x) => s + (+x || 0), 0));
+
+  // Open incidents at each step: started before it, not resolved before it.
+  const all = incs ? [...(incs.breaching || []), ...(incs.resolved || [])] : [];
+  const openAt = points.map(p => {
+    const ts = p.ts > 1e12 ? p.ts / 1000 : p.ts;
+    return all.filter(i => i.startedAt <= ts && (!i.resolvedAt || i.resolvedAt > ts)).length;
+  });
+
+  const open = o.incidents.openCount;
+  $("#heroTiles").innerHTML = [
+    kTile({ label: "Modeled spend", value: usd(c.usdPerHour, 4) + "<span class='kunit'>/hr</span>",
+            valueColor: "--cost", spark: spend, sparkColor: "--cost", href: "#cost",
+            delta: deltaLine(halves(spend), false, x => usd(x, 4) + "/hr") }),
+    kTile({ label: "Active incidents", value: nf(open), valueColor: open ? "--err" : "--ok",
+            spark: openAt, sparkColor: "--err", href: "#incidents",
+            delta: open ? `${nf(o.incidents.open.filter(i => i.severity === "CRITICAL").length)} critical · open now`
+                        : `<span class="faint">none open</span>` }),
+    kTile({ label: "Requests", value: nf(t.requests), spark: req, sparkColor: "--accent", href: "#logs",
+            delta: deltaLine(halves(req), true, x => nf(Math.round(x)) + " req/min") }),
+    kTile({ label: "Error rate", value: pct(t.errorRatePct, 2),
+            valueColor: t.errorRatePct > 5 ? "--err" : t.errorRatePct > 1 ? "--warn" : null,
+            spark: errRate, sparkColor: "--err", href: "#logs?severity=ERROR",
+            delta: deltaLine(halves(errRate), false, x => x.toFixed(2) + " pp") }),
+  ].join("");
+}
+
 /* ---------- overview: status strip ----------
    Project identity on one row, then the five numbers that say whether it is
    healthy. Same shape in every cell: name, value, qualifier. */
@@ -239,19 +306,14 @@ async function loadOverview() {
   const cls = setHealthPill(h);
   renderStatusStrip(o, cls);
 
-  $("#heroTiles").innerHTML = [
-    tile("System health", nf(h.score, 1), `${esc(h.status)} · ${h.penalties.length} penalty factor(s)`, cls, "heart", "err"),
-    tile("Traffic", nf(t.requestsPerMin, 1) + "<span class='faint' style='font-size:14px'> /min</span>",
-         `${nf(t.requests)} requests · ${pct(t.errorRatePct, 2)} 5xx · ${nf(t.errors4xx)} 4xx`, null, "activity", "accent"),
-    tile("Checkout success", b.checkoutSuccessRatePct === null ? "—" : pct(b.checkoutSuccessRatePct),
-         `${nf(b.checkoutsConfirmed)} paid · ${inr(b.revenueAtRiskInr)} at risk`,
-         b.checkoutSuccessRatePct === null ? "muted" : b.checkoutSuccessRatePct >= 90 ? "ok" : b.checkoutSuccessRatePct >= 75 ? "warn" : "err", "cart", "ok"),
-    tile("Modeled spend", usd(c.usdPerHour, 4) + "<span class='faint' style='font-size:14px'>/hr</span>",
-         `${usd(c.projectedUsdPerMonth, 2)}/mo at this rate · modeled`, "cost", "coins", "cost"),
-  ].join("");
-
-  const pts = await api(`/api/v1/metrics/series?window=${state.window}`);
+  // Series for the sparklines, fetched once and shared with the traffic chart.
+  const [pts, incs] = await Promise.all([
+    api(`/api/v1/metrics/series?window=${state.window}`),
+    api(`/api/v1/incidents?window=${state.window}`).catch(() => null),
+  ]);
   const points = complete(pts.points);
+  const costSeries = complete(c.series || []);
+  renderKeyNumbers({ t, c, o, points, costSeries, incs });
   drawTraffic(points);
   const cs = complete(c.series || []);
   upsert("cost", "chCost", "line", {
@@ -286,9 +348,24 @@ async function loadOverview() {
 
 function renderActions(q) {
   const box = $("#actionQueue");
-  $("#actionCount").textContent = q.total
-    ? `${q.firingNow} firing · ${q.total} total` : "all clear";
-  $("#actionHint").textContent = q.ranking;
+  // Heading states the count; the pill says an explanation is one click away.
+  // It only claims "AI" when a model is actually configured; otherwise the
+  // explanation is the deterministic write-up built from the same evidence.
+  const n = q.total;
+  $("#actionTitle").textContent = n
+    ? `${n} ${n === 1 ? "thing needs" : "things need"} attention`
+    : "Nothing needs attention";
+  const ai = !!(state.meta && state.meta.config && state.meta.config.aiEnabled);
+  const pill = $("#actionCount");
+  pill.className = n ? "pill info explain-pill" : "pill ok";
+  pill.innerHTML = n
+    ? `<span aria-hidden="true">✦</span> ${ai ? "AI explanation available" : "Explanation available"}`
+    : "all clear";
+  pill.title = n
+    ? (ai ? `Open an incident and press Explain for a grounded write-up (${state.meta.config.aiModel || "model"}).`
+          : "Open an incident and press Explain. AI is off, so the write-up is built directly from the evidence.")
+    : "";
+  pill.onclick = n ? () => go("incidents") : null;
   if (!q.actions.length) {
     box.innerHTML = `<div class="empty">Nothing needs attention. Traffic is healthy and no recommendation is outstanding.</div>`;
     return;

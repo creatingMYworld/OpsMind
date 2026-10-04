@@ -401,3 +401,22 @@ pre.json {
   .strip-cell { border-left: 0; border-top: 1px solid var(--border); }
   .strip-lead { grid-column: 1 / -1; border-top: 0; }
 }
+
+
+/* ---------- overview key numbers ---------- */
+.ktile { display: block; color: var(--text); text-decoration: none; transition: border-color .15s, background .15s; }
+.ktile:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--bg-elev2); }
+.ktile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ktile-label {
+  display: flex; justify-content: space-between; align-items: center;
+  color: var(--text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px;
+}
+.ktile-go { color: var(--text-faint); opacity: 0; transition: opacity .15s; }
+.ktile:hover .ktile-go { opacity: 1; }
+.ktile-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin: 8px 0 6px; }
+.ktile-value { font-size: 28px; font-weight: 700; letter-spacing: -.8px; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kunit { font-size: 14px; font-weight: 600; color: var(--text-faint); letter-spacing: 0; }
+.kspark { flex: none; }
+.ktile-foot { color: var(--text-faint); font-size: 12px; }
+.explain-pill { cursor: pointer; }
+.explain-pill:hover { filter: brightness(1.15); }
