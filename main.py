@@ -671,6 +671,32 @@ def cost_billed() -> Dict[str, Any]:
     return cost_engine.billed_status()
 
 
+@app.get("/api/v1/cost/summary")
+def cost_summary(window: int = Query(30, ge=1, le=180)) -> Dict[str, Any]:
+    """A written summary of the cost picture, for the Optimization Center.
+
+    Gemini writes it when AI is enabled; otherwise the same numbers are
+    summarised deterministically and the response says `ai: false`, so the UI
+    only tags text a model actually wrote.
+    """
+    from .ai import explain as explainer
+
+    c = cost_engine.rate(store, window_minutes=window)
+    recs = recommend_engine.generate(store, window_minutes=max(window, 15))
+    ctx = {
+        "cost": {k: c.get(k) for k in ("usdPerHour", "projectedUsdPerDay",
+                                       "projectedUsdPerMonth", "byDriver")},
+        "byService": [{"service": s["service"],
+                       "usdPerHour": s["usdPerHour"]["total"]}
+                      for s in c.get("byService", [])],
+        "recommendations": [{k: r.get(k) for k in
+                             ("title", "severity", "recommendation",
+                              "estimatedSavingUsdPerMonth", "observedMetric",
+                              "observedValue", "unit")} for r in recs],
+    }
+    return explainer.summarize_cost(ctx)
+
+
 @app.get("/api/v1/recommendations")
 def recommendations(window: int = Query(30, ge=1, le=180)) -> Dict[str, Any]:
     recs = recommend_engine.generate(store, window_minutes=window)

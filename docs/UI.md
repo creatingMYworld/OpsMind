@@ -110,6 +110,7 @@ the write-up is then built deterministically from the evidence.
 | `GET /api/v1/routes` | Per-route p95, 5xx rate and slow-request count, read from the log buffer. Minute buckets only keep overall percentiles. Takes `window`, `slow_ms`, `limit`. |
 | `GET /how-it-works`, `GET /about` | Marketing pages. |
 | Local `Check access` | In local mode the `local` project reports its direct-ingest connection instead of probing Cloud Logging for a project that does not exist. |
+| `GET /api/v1/cost/summary` | Optimization Center summary: Gemini when AI is on, deterministic otherwise, with `ai` saying which. |
 | `toast()` in `app.js` | Setup's project switch called it before it existed, so a successful switch threw. |
 
 ## Running it locally
@@ -127,23 +128,41 @@ CPU comes from `service.heartbeat` events with `cpuPct`.
 
 ## Status and next work (2026-10-04)
 
-Local branch `ui-updates` is two commits ahead of `origin/opsmind-staging`
-(`67d6a26` docs, `5b0c422` Services/Logs/Setup/Insights). Not pushed yet.
+Local branch `ui-updates` is ahead of `origin/opsmind-staging`. Not pushed.
 
-Requested next, in this order:
+Done in this pass:
 
-1. **Resources**: add charts. Reference: four cards in a 2×2 grid, each one
-   line or area chart with its own unit: CPU utilisation (%), Memory, Database
-   connections, Instance count. One chart per unit, never two y-axes. Note the
-   reference's memory axis reads "00MB": fix units so ticks are legible.
-2. **Cost, optimization centre**: clean tiles and layout, and a summary from
-   Gemini. Wherever AI writes text, tag it visibly as AI-generated (Gemini on
-   Vertex AI). When AI is off, fall back to the deterministic summary and do
-   not show the AI tag.
-3. **Alerts**: redesign into a neat, structured layout (rules as tiles or a
-   table with threshold, window, state).
-4. **Setup**: tidy to the reference (platform row; In use; Available to
-   connect; consistent tile heights and spacing). Clicking an **In use**
-   service opens its **cost**: what that Google Cloud service costs in the
-   modeled spend (use `/api/v1/cost` drivers: CPU and memory map to Cloud Run,
-   requests to Cloud Run requests, logging to Cloud Logging).
+1. **Resources**: a 2x2 grid of per-service line charts, one unit each -- CPU
+   utilisation (%), Memory (MiB), In-flight requests, Instance count. Series
+   use `--s1`..`--s4` (they previously borrowed status colours), each chart
+   labels its own y ticks with the unit, and the instance chart is stepped to
+   whole numbers so ticks cannot repeat.
+2. **Cost, Optimization Center**: lifted out of its card into its own section
+   -- three summary tiles (calculated savings, open recommendations, high
+   severity), a written **Summary**, then one card per recommendation in a
+   two-column grid with its saving, evidence and command. The summary comes
+   from `GET /api/v1/cost/summary`, which asks Gemini when `AI_ENABLED=true`
+   and otherwise returns the same numbers summarised deterministically. The
+   response carries `ai: true|false`, and only `ai: true` text is tagged
+   **AI - Gemini on Vertex AI** (`AI_TAG` in `app.js`, `.pill.ai`). The
+   incident explanation uses the same tag.
+3. **Alerts**: four tiles, the two delivery sources side by side, then one
+   card per rule -- name, category, source and state on the left; metric,
+   window, severity, the editable threshold and the buttons on the right;
+   current breaches underneath.
+4. **Setup**: each **In use** service is now a button. Clicking it opens a
+   drawer with what that Google Cloud service costs in the modeled spend --
+   its rate, share of the project, projections, the drivers it is charged on
+   (Cloud Run = cpu + memory + requests, Cloud Logging = logging), and for
+   Cloud Run the per-application-service split. Services OpsMind does not
+   price say so rather than showing a zero.
+5. **Incident evidence** (`incidentDetailHtml`, used by both the expanded
+   incident card and the drawer): the stack of bare `<h5>` headings and inline
+   styles became `.ev` sections in a two-column `.ev-grid` -- Impact (wide),
+   Suspected root cause, Top errors, Before vs during, Sample trace, Timeline
+   (wide), Explanation (wide). Everything reuses `fact()`, `.ev-table` and the
+   existing pills; it collapses to one column under 1000px, which is how it
+   renders in the drawer.
+
+Backend added: `GET /api/v1/cost/summary` and `ai/explain.summarize_cost()`
+(120s cache, deterministic fallback, never raises).

@@ -350,6 +350,13 @@ const svcShort = n => String(n || "").replace(/^cognikart-/, "");
 function chip(text, tone) {
   return `<span class="sec-chip" style="--chip:var(${tone})"><span class="dot"></span>${esc(text)}</span>`;
 }
+/* One label-and-value line. Used wherever evidence is listed out. */
+function fact(label, valueHtml) {
+  return `<div class="fact"><span class="fk">${esc(label)}</span><span class="fv">${valueHtml}</span></div>`;
+}
+/* Only text a model actually wrote carries this tag. Deterministic fallbacks
+   are shown untagged, because nothing generated them. */
+const AI_TAG = `<span class="pill ai">✦ AI · Gemini on Vertex AI</span>`;
 function linkTile({ label, value, valueColor, foot, href, spark, sparkColor }) {
   return `<a class="card ktile" href="${href}">
     <div class="ktile-label">${esc(label)}<span class="ktile-go" aria-hidden="true">→</span></div>
@@ -1055,20 +1062,24 @@ async function loadResources() {
   }).join("") || `<div class="empty">No services reporting.</div>`;
 
   const svcNames = [...new Set(s.services.map(x => x.service))];
-  const palette = [css("--accent"), css("--ok"), css("--warn"), css("--err"), css("--info")];
+  // Series slots only -- status colours never stand in for a series.
+  const palette = [css("--s1"), css("--s2"), css("--s3"), css("--s4")];
   const series = await Promise.all(svcNames.map(n => api(`/api/v1/metrics/series?window=${state.window}&service=${encodeURIComponent(n)}`)));
   const base = complete(pts.points);
   const labels = base.map(p => hhmm(p.ts));
-  upsert("cpu", "chCpu", "line", {
+  // One chart per unit, each labelling its own axis, so nothing needs two
+  // y-axes and no tick is left reading "00MB".
+  const yBase = chartDefaults().scales.y;  // keep the shared grid, drop only the tick text
+  const resChart = (key, canvas, field, tick, extraTicks) => upsert(key, canvas, "line", {
     labels,
-    datasets: series.map((r, i) => ds(svcNames[i].replace("cognikart-", ""),
-      alignTo(base, r.points, "cpuPctMax"), palette[i % palette.length], false)),
-  });
-  upsert("mem", "chMem", "line", {
-    labels,
-    datasets: series.map((r, i) => ds(svcNames[i].replace("cognikart-", ""),
-      alignTo(base, r.points, "rssMbMax"), palette[i % palette.length], false)),
-  });
+    datasets: series.map((r, i) => ds(svcShort(svcNames[i]),
+      alignTo(base, r.points, field), palette[i % palette.length], false)),
+  }, { scales: { y: Object.assign({}, yBase, { ticks: Object.assign({}, yBase.ticks, { callback: tick }, extraTicks || {}) }) } });
+  resChart("cpu", "chCpu", "cpuPctMax", v => nf(v) + "%");
+  resChart("mem", "chMem", "rssMbMax", v => nf(v) + " MiB");
+  resChart("inflight", "chInflight", "inflightMax", v => nf(v));
+  // Whole instances only -- fractional ticks would repeat the same label.
+  resChart("inst", "chInst", "instanceCount", v => nf(v), { stepSize: 1, precision: 0 });
 
   $("#platformMetrics").innerHTML = !plat.available
     ? `<div class="empty">${esc(plat.reason || "not available")}</div>`
@@ -1397,20 +1408,24 @@ async function loadSetup() {
   ].join("");
 
   // What each Google Cloud service does for OpsMind, and whether it is on.
+  // Each in-use service names the cost drivers it is charged on, so clicking
+  // it can show what that service costs in the modeled spend.
   const svc = [
-    ["scroll", "accent", "Cloud Logging", "Logs and errors", gcp ? logsOn : false, gcp ? "Live" : "Local mode"],
-    ["cpu", "info", "Cloud Monitoring", "CPU, memory, instances", gcp, gcp ? "Live" : "Local mode"],
-    ["layers", "ok", "Cloud Run", "Hosts the application", true, "In use"],
-    ["sparkles", "cost", "Vertex AI · Gemini", "Incident explanations", !!c.aiEnabled, c.aiEnabled ? (c.aiModel || "On") : "Off"],
-    ["coins", "money", "Cloud Billing pricing", "Modeled spend", true, c.pricingVerifiedOn ? "Prices " + c.pricingVerifiedOn : "In use"],
-    ["nodes", "warn", "Resource Manager", "Project discovery", gcp, gcp ? "In use" : "Local mode"],
+    ["scroll", "accent", "Cloud Logging", "Logs and errors", gcp ? logsOn : false, gcp ? "Live" : "Local mode", ["logging"]],
+    ["cpu", "info", "Cloud Monitoring", "CPU, memory, instances", gcp, gcp ? "Live" : "Local mode", []],
+    ["layers", "ok", "Cloud Run", "Hosts the application", true, "In use", ["cpu", "memory", "requests"]],
+    ["sparkles", "cost", "Vertex AI · Gemini", "Incident explanations", !!c.aiEnabled, c.aiEnabled ? (c.aiModel || "On") : "Off", []],
+    ["coins", "money", "Cloud Billing pricing", "Modeled spend", true, c.pricingVerifiedOn ? "Prices " + c.pricingVerifiedOn : "In use", []],
+    ["nodes", "warn", "Resource Manager", "Project discovery", gcp, gcp ? "In use" : "Local mode", []],
   ];
-  $("#setupServices").innerHTML = svc.map(([icon, tint, name, what, on, state]) => `
-    <div class="card setup-svc">
+  $("#setupServices").innerHTML = svc.map(([icon, tint, name, what, on, st], i) => `
+    <button class="card setup-svc is-click" data-svc="${i}" title="Show what ${esc(name)} costs">
       ${ico(icon, tint)}
-      <div class="setup-svc-text"><div class="setup-svc-name">${name}</div><div class="faint">${what}</div></div>
-      <span class="pill ${on ? "ok" : "muted"}"><span class="dot"></span>${esc(state)}</span>
-    </div>`).join("");
+      <div class="setup-svc-text"><div class="setup-svc-name">${esc(name)}</div><div class="faint">${esc(what)}</div></div>
+      <span class="pill ${on ? "ok" : "muted"}"><span class="dot"></span>${esc(st)}</span>
+    </button>`).join("");
+  $$("#setupServices [data-svc]").forEach(b =>
+    b.addEventListener("click", () => showServiceCost(svc[+b.dataset.svc])));
 
   const platforms = [
     ["cloud", "accent", "Google Cloud", gcp ? "Connected" : "Local mode", gcp ? "ok" : "info"],
@@ -1438,6 +1453,51 @@ async function loadSetup() {
   const used = svc.filter(x => x[4]).length;
   $("#svcUsedChip").innerHTML = chip(`${used} of ${svc.length} active`, "--ok");
   $("#svcAvailChip").innerHTML = chip(`${available.length} not connected`, "--text-faint");
+}
+
+/* What one Google Cloud service costs inside the modeled spend. Only the
+   drivers OpsMind actually prices are charged to a service; everything else
+   is read-only or unmetered here, and says so rather than showing a zero. */
+const DRIVER_LABEL = { cpu: "vCPU-seconds", memory: "GiB-seconds", requests: "Requests", logging: "Log ingestion" };
+async function showServiceCost([icon, tint, name, what, on, st, drivers]) {
+  openDrawer(name, `<span class="pill ${on ? "ok" : "muted"}"><span class="dot"></span>${esc(st)}</span>
+    <span class="faint">${esc(what)}</span>`, `<div class="empty"><span class="spin"></span> pricing…</div>`);
+  let c;
+  try { c = await api(`/api/v1/cost?window=${state.window}`); }
+  catch (e) { $("#drawerBody").innerHTML = `<div class="empty">Could not load cost: ${esc(e.message)}</div>`; return; }
+
+  const total = c.usdPerHour || 0;
+  const rate = (drivers || []).reduce((s, k) => s + (c.byDriver[k] || 0), 0);
+  const share = total ? 100 * rate / total : 0;
+  const body = !drivers || !drivers.length
+    ? `<div class="ev">
+         <div class="ev-head">Modeled cost</div>
+         <div class="faint">${esc(name)} is not charged in the modeled spend: it is either free to read or not metered by OpsMind. The modeled rate below belongs entirely to the services that are.</div>
+         <div class="fact" style="margin-top:10px"><span class="fk">Project modeled rate</span><span class="fv num">${usd(total)}/hr</span></div>
+       </div>`
+    : `<div class="ev">
+         <div class="ev-head">Modeled cost</div>
+         <div class="grid g2">
+           <div class="card"><div class="ev-k">THIS SERVICE</div>
+             <div class="ev-big">${usd(rate)}<span class="faint">/hr</span></div>
+             <div class="faint">${pct(share)} of the project's modeled rate</div></div>
+           <div class="card"><div class="ev-k">PROJECTED</div>
+             <div class="ev-big">${usd(rate * 24, 3)}<span class="faint">/day</span></div>
+             <div class="faint">${usd(rate * 730, 2)}/month at this rate</div></div>
+         </div>
+       </div>
+       <div class="ev">
+         <div class="ev-head">Charged on</div>
+         <div class="rec-facts">${drivers.map(k =>
+           fact(DRIVER_LABEL[k] || k, `<span class="num">${usd(c.byDriver[k] || 0)}/hr</span>`)).join("")}</div>
+       </div>
+       ${name === "Cloud Run" && (c.byService || []).length ? `<div class="ev">
+         <div class="ev-head">By application service</div>
+         <div class="rec-facts">${c.byService.map(s =>
+           fact(svcShort(s.service), `<span class="num">${usd(s.usdPerHour.total)}/hr</span>`)).join("")}</div>
+       </div>` : ""}`;
+  $("#drawerBody").innerHTML = body +
+    `<div class="faint ev-foot">Modeled: measured usage × published list prices${c.pricingVerifiedOn ? ", verified " + esc(c.pricingVerifiedOn) : ""}. Not an invoice.</div>`;
 }
 
 /* ---------- cost ---------- */
@@ -1490,54 +1550,122 @@ async function loadCost() {
     <h3 style="margin:14px 0 6px;font-size:12px;letter-spacing:.5px;color:var(--text-dim)">RECONCILIATION PLAN</h3>
     <div style="font-size:12.5px" class="muted">${esc(billed.reconciliationPlan)}</div>`;
 
-  $("#recHint").innerHTML = esc(recs.note);
-  $("#recs").innerHTML = recs.recommendations.length === 0
-    ? `<div class="empty">No recommendations in this window.</div>`
-    : recs.recommendations.map(r => `<div class="rec ${r.severity}">
-        <div class="title">${esc(r.title)} <span class="pill muted" style="margin-left:5px">${esc(r.provenance)}</span></div>
-        <div class="why">${esc(r.recommendation)}</div>
-        <div class="why faint" style="font-size:12px">${esc(r.rationale)}</div>
-        <div style="font-size:12px;display:flex;gap:14px;flex-wrap:wrap;margin-top:5px">
-          <span class="faint">${esc(r.observedMetric)}: <strong>${esc(r.observedValue)}${esc(r.unit)}</strong></span>
-          <span class="faint">${esc(r.timeWindow)}</span>
-          <span class="faint">confidence ${esc(r.confidence)}</span>
-          ${r.estimatedSavingUsdPerMonth !== null
-            ? `<span class="saving">saves ${usd(r.estimatedSavingUsdPerMonth, 4)}/mo</span>`
-            : `<span class="saving none">${esc(r.savingStatus)}</span>`}
+  renderOptimization(recs);
+}
+
+/* The Optimization Center: three numbers that frame the list, a written
+   summary, then one card per recommendation. */
+function renderOptimization(recs) {
+  const list = recs.recommendations || [];
+  const high = list.filter(r => r.severity === "HIGH").length;
+  const priced = list.filter(r => r.estimatedSavingUsdPerMonth !== null).length;
+
+  $("#optChip").innerHTML = list.length
+    ? chip(`${nf(list.length)} open`, high ? "--warn" : "--text-faint")
+    : chip("Nothing to change", "--ok");
+  $("#optTiles").innerHTML = [
+    tile("Calculated savings", usd(recs.totalCalculatedSavingUsdPerMonth, 4) + "<span class='faint' style='font-size:14px'>/mo</span>",
+         `${priced} of ${list.length} priced from list prices`, "ok", "coins", "money"),
+    tile("Recommendations", nf(list.length), "evidence-backed, in this window", "", "sparkles", "accent"),
+    tile("High severity", nf(high), high ? "act on these first" : "nothing urgent", high ? "err" : "", "alert", high ? "err" : "ok"),
+  ].join("");
+
+  $("#recHint").textContent = `${recs.note} Google Recommender: ${recs.googleRecommender.reason}`;
+
+  $("#recs").innerHTML = list.length === 0
+    ? `<div class="card"><div class="empty">No recommendation applies to this window.</div></div>`
+    : list.map(r => `<div class="card rec-card ${esc(r.severity)}">
+        <div class="rec-head">
+          <div class="rec-title">${esc(r.title)}</div>
+          <span class="pill ${r.severity === "HIGH" ? "err" : r.severity === "MEDIUM" ? "warn" : "muted"}">${esc(r.severity)}</span>
         </div>
-        ${r.savingBasis ? `<div class="faint" style="font-size:11px;margin-top:4px">basis: ${esc(r.savingBasis)}</div>` : ""}
-        <code>${esc(r.suggestedAction)}</code></div>`).join("") +
-      `<div class="faint" style="font-size:12px;margin-top:10px"><strong>Google Recommender:</strong> ${esc(recs.googleRecommender.reason)}</div>`;
+        <div class="rec-save">${r.estimatedSavingUsdPerMonth !== null
+          ? `<span class="saving">${usd(r.estimatedSavingUsdPerMonth, 4)}<span class="faint">/mo</span></span>`
+          : `<span class="saving none">${esc(r.savingStatus)}</span>`}</div>
+        <div class="rec-body">${esc(r.recommendation)}</div>
+        <div class="rec-body faint">${esc(r.rationale)}</div>
+        <div class="rec-facts">
+          ${fact(r.observedMetric, `<span class="num">${esc(r.observedValue)}${esc(r.unit)}</span>`)}
+          ${fact("Window", esc(r.timeWindow))}
+          ${fact("Confidence", esc(r.confidence))}
+          ${fact("Source", esc(r.provenance))}
+          ${r.savingBasis ? fact("Saving basis", esc(r.savingBasis)) : ""}
+        </div>
+        <code>${esc(r.suggestedAction)}</code></div>`).join("");
+
+  // The summary is written last and separately: a slow or absent model must
+  // never hold up the numbers above it.
+  const box = $("#optSummary");
+  box.innerHTML = `<div class="opt-sum-head"><h3>Summary</h3><span class="faint"><span class="spin"></span> writing…</span></div>`;
+  api(`/api/v1/cost/summary?window=${Math.max(state.window, 15)}`).then(s => {
+    box.innerHTML = `<div class="opt-sum-head"><h3>Summary</h3>${s.ai ? AI_TAG : `<span class="pill muted">calculated</span>`}</div>
+      <p class="opt-sum-text">${esc(s.summary)}</p>
+      ${s.ai ? `<div class="faint opt-sum-foot">Written by ${esc(s.model || "Gemini")} from the modeled spend and recommendations on this page. Numbers above are measured, not generated.</div>`
+             : `<div class="faint opt-sum-foot">Gemini is off (${esc(s.reason || "AI disabled")}), so this is calculated directly from the same numbers.</div>`}`;
+  }).catch(e => { box.innerHTML = `<div class="opt-sum-head"><h3>Summary</h3></div><div class="faint">Summary unavailable: ${esc(e.message)}</div>`; });
 }
 
 /* ---------- alerts ---------- */
 async function loadAlerts() {
   const a = await api("/api/v1/alerts");
-  $("#alertSources").innerHTML = `<h3>Where alerts come from</h3><div class="hint">${esc(a.note)}</div>` +
-    a.sources.map(s => `<div style="margin-bottom:9px;font-size:12.5px">
-      <span class="pill ${s.source === "fast-path" ? "info" : "ok"}">${esc(s.source)}</span>
-      <span class="faint" style="margin-left:7px">latency ${esc(s.latency)}</span>
-      <div class="muted" style="margin-top:3px">${esc(s.description)}</div></div>`).join("");
+  const rules = a.rules;
+  const breaching = rules.filter(r => r.breachCount).length;
+  const off = rules.filter(r => !r.enabled).length;
 
-  $("#alertList").innerHTML = a.rules.map(r => `
-    <div class="card" style="margin-bottom:12px">
-      <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
-        <strong>${esc(r.name)}</strong>
-        <span class="pill ${r.category === "cost" ? "cost" : r.category === "business" ? "warn" : "info"}">${esc(r.category)}</span>
-        <span class="pill muted">${esc(r.source)}</span>
-        ${r.breachCount ? `<span class="pill err"><span class="dot"></span>${r.breachCount} breaching</span>` : `<span class="pill ok"><span class="dot"></span>ok</span>`}
-        <span style="margin-left:auto;display:flex;gap:7px;align-items:center">
-          <label class="faint" style="font-size:12px">threshold</label>
-          <input type="number" step="any" value="${r.threshold}" data-th="${esc(r.id)}" style="width:100px">
-          <span class="faint" style="font-size:12px">${esc(r.unit)}</span>
-          <button class="btn" data-save="${esc(r.id)}">Save</button>
-          <button class="btn" data-tog="${esc(r.id)}" data-on="${r.enabled}">${r.enabled ? "Disable" : "Enable"}</button>
-        </span>
+  $("#alertTiles").innerHTML = [
+    tile("Rules", nf(rules.length), "evaluated against the live stream", "", "alert", "accent"),
+    tile("Breaching now", nf(breaching), breaching ? "thresholds crossed" : "all within threshold",
+         breaching ? "err" : "ok", "bolt", breaching ? "err" : "ok"),
+    tile("Disabled", nf(off), off ? "not evaluated" : "every rule is on", off ? "warn" : "", "cpu", off ? "warn" : "ok"),
+    tile("Detection latency", `${nf(rules[0] && rules[0].expectedDetectionLatencyS)}s`, "fast path, after the breach", "", "activity", "info"),
+  ].join("");
+  $("#alertChip").innerHTML = breaching ? chip(`${nf(breaching)} breaching`, "--err") : chip("All within threshold", "--ok");
+
+  $("#alertSources").innerHTML = a.sources.map(s => `
+    <div class="card src-card">
+      <div class="src-head"><span class="pill ${s.source === "fast-path" ? "info" : "ok"}">${esc(s.source)}</span>
+        <span class="faint">latency ${esc(s.latency)}</span></div>
+      <div class="muted src-body">${esc(s.description)}</div>
+    </div>`).join("") || `<div class="card"><div class="empty">No alert source configured.</div></div>`;
+
+  // One rule per row: what it watches on the left, the editable threshold on
+  // the right, breaches underneath where they cannot be missed.
+  const catTone = { cost: "cost", business: "warn" };
+  $("#alertList").innerHTML = rules.map(r => `
+    <div class="card rule${r.breachCount ? " breaching" : ""}${r.enabled ? "" : " is-off"}">
+      <div class="rule-main">
+        <div class="rule-id">
+          <div class="rule-name">${esc(r.name)}</div>
+          <div class="rule-tags">
+            <span class="pill ${catTone[r.category] || "info"}">${esc(r.category)}</span>
+            <span class="pill muted">${esc(r.source)}</span>
+            ${r.breachCount
+              ? `<span class="pill err"><span class="dot"></span>${nf(r.breachCount)} breaching</span>`
+              : r.enabled ? `<span class="pill ok"><span class="dot"></span>within threshold</span>`
+                          : `<span class="pill muted"><span class="dot"></span>disabled</span>`}
+          </div>
+          <div class="muted rule-desc">${esc(r.description)}</div>
+          <div class="faint rule-why"><strong>Why this rule:</strong> ${esc(r.rationale)}</div>
+        </div>
+        <div class="rule-set">
+          <div class="rule-facts">
+            ${fact("Metric", `<span class="mono">${esc(r.metric)}</span>`)}
+            ${fact("Window", `${nf(r.windowMinutes)} min`)}
+            ${fact("Severity", esc(r.severity))}
+          </div>
+          <label class="rule-th">
+            <span class="faint">Alert when ${esc(r.comparator === "lt" ? "below" : "above")}</span>
+            <span class="rule-input"><input type="number" step="any" value="${r.threshold}" data-th="${esc(r.id)}"><span class="faint">${esc(r.unit)}</span></span>
+          </label>
+          <div class="rule-btns">
+            <button class="btn primary" data-save="${esc(r.id)}">Save</button>
+            <button class="btn" data-tog="${esc(r.id)}" data-on="${r.enabled}">${r.enabled ? "Disable" : "Enable"}</button>
+          </div>
+        </div>
       </div>
-      <div class="muted" style="font-size:12.5px;margin-top:7px">${esc(r.description)}</div>
-      <div class="faint" style="font-size:12px;margin-top:4px"><strong>Why this rule:</strong> ${esc(r.rationale)}</div>
-      ${r.currentlyBreaching.map(b => `<div style="font-size:12px;margin-top:6px;color:var(--err)">
-          ▸ ${esc(b.scope)} — observed <strong>${nf(b.observed, 2)}${esc(b.unit)}</strong> vs threshold ${nf(b.threshold, 2)}${esc(b.unit)}</div>`).join("")}
+      ${r.currentlyBreaching.length ? `<div class="rule-breaches">${r.currentlyBreaching.map(b => `
+        <div class="rule-breach"><span class="mono">${esc(b.scope)}</span>
+          <span>observed <strong>${nf(b.observed, 2)}${esc(b.unit)}</strong> against ${nf(b.threshold, 2)}${esc(b.unit)}</span></div>`).join("")}</div>` : ""}
     </div>`).join("");
 
   $$("#alertList [data-save]").forEach(btn => btn.addEventListener("click", async () => {
@@ -1681,69 +1809,95 @@ async function incidentDetailHtml(id) {
   const citations = Object.entries(c.dependencyCitations || {});
   const maxCite = citations.length ? Math.max(...citations.map(([, v]) => v)) : 1;
 
+  const up = (cost.deltaUsdPerHour || 0) > 0;
   return `
-    <h5>Impact</h5>
-    <div class="grid g2">
-      <div class="card"><div class="label faint" style="font-size:11px">CLOUD COST (modeled)</div>
-        <div style="font-size:23px;font-weight:700" class="${(cost.deltaUsdPerHour || 0) > 0 ? "delta-up" : "delta-down"}">
-          ${(cost.deltaUsdPerHour || 0) > 0 ? "+" : ""}${usd(cost.deltaUsdPerHour)}<span class="faint" style="font-size:13px">/hr</span></div>
-        <div class="faint" style="font-size:11.5px">baseline ${usd(cost.baselineUsdPerHour)}/hr · dominant driver ${esc(cost.dominantDriver || "—")}</div>
-        <div class="faint" style="font-size:11.5px">incurred so far ${usd(cost.incurredUsdSoFar, 5)}</div></div>
-      <div class="card"><div class="label faint" style="font-size:11px">REVENUE AT RISK (measured)</div>
-        <div style="font-size:23px;font-weight:700" class="saving">${inr(biz.revenueAtRiskInr)}</div>
-        <div class="faint" style="font-size:11.5px">${nf(biz.failedCheckouts)} failed checkouts · success ${pct(biz.checkoutSuccessRatePct)}</div></div>
-    </div>
-    <div class="faint" style="font-size:11px;margin-top:6px">${esc(cost.disclaimer)}</div>
+    <div class="ev-grid">
+      <section class="ev ev-wide">
+        <div class="ev-head">Impact</div>
+        <div class="grid g2">
+          <div class="card ev-metric">
+            <div class="ev-k">Cloud cost <span class="faint">modeled</span></div>
+            <div class="ev-big ${up ? "delta-up" : "delta-down"}">${up ? "+" : ""}${usd(cost.deltaUsdPerHour)}<span class="faint">/hr</span></div>
+            <div class="rec-facts">
+              ${fact("Baseline", `<span class="num">${usd(cost.baselineUsdPerHour)}/hr</span>`)}
+              ${fact("Dominant driver", esc(cost.dominantDriver || "—"))}
+              ${fact("Incurred so far", `<span class="num">${usd(cost.incurredUsdSoFar, 5)}</span>`)}
+            </div>
+          </div>
+          <div class="card ev-metric">
+            <div class="ev-k">Revenue at risk <span class="faint">measured</span></div>
+            <div class="ev-big saving">${inr(biz.revenueAtRiskInr)}</div>
+            <div class="rec-facts">
+              ${fact("Failed checkouts", `<span class="num">${nf(biz.failedCheckouts)}</span>`)}
+              ${fact("Checkout success", `<span class="num">${pct(biz.checkoutSuccessRatePct)}</span>`)}
+            </div>
+          </div>
+        </div>
+        <div class="faint ev-foot">${esc(cost.disclaimer)}</div>
+      </section>
 
-    <h5>Suspected root cause</h5>
-    ${c.suspectedRootCauseService ? `
-      <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;flex-wrap:wrap">
-        <span class="pill err"><span class="dot"></span>${esc(c.suspectedRootCauseService)}</span>
-        ${c.isLikelyDownstream ? `<span class="faint" style="font-size:12px">this service is downstream, not at fault</span>` : ""}
-      </div>
-      <div class="faint" style="font-size:12px;margin-bottom:7px">${esc(c.rootCauseBasis || "")}</div>
-      ${citations.map(([k, v]) => `
-        <div style="font-size:12px;display:flex;justify-content:space-between"><span>${esc(k)}</span><span class="num">${nf(v)}</span></div>
-        <div class="bar-track" style="margin-bottom:5px"><div class="bar-fill err" style="width:${100 * v / maxCite}%"></div></div>`).join("")}`
-      : `<div class="faint">Not determinable from this window.</div>`}
+      <section class="ev">
+        <div class="ev-head">Suspected root cause</div>
+        ${c.suspectedRootCauseService ? `
+          <div class="ev-cause">
+            <span class="pill err"><span class="dot"></span>${esc(c.suspectedRootCauseService)}</span>
+            ${c.isLikelyDownstream ? `<span class="faint">this service is downstream, not at fault</span>` : ""}
+          </div>
+          <div class="faint ev-basis">${esc(c.rootCauseBasis || "")}</div>
+          ${citations.map(([k, v]) => `
+            <div class="ev-cite"><span>${esc(k)}</span><span class="num">${nf(v)}</span></div>
+            <div class="bar-track"><div class="bar-fill err" style="width:${100 * v / maxCite}%"></div></div>`).join("")}`
+          : `<div class="faint">Not determinable from this window.</div>`}
+      </section>
 
-    <h5>Top errors</h5>
-    ${ev.topErrors.length ? ev.topErrors.map(e => `
-      <div style="font-size:12.5px;display:flex;justify-content:space-between;padding:3px 0">
-        <span><strong style="color:var(--err)">${esc(e.errorCode)}</strong>
-          <span class="faint">${esc(e.service)} ${esc(e.route || "")}</span></span>
-        <span class="num">${nf(e.count)}</span></div>`).join("")
-      : '<div class="faint">None grouped in this window.</div>'}
+      <section class="ev">
+        <div class="ev-head">Top errors</div>
+        ${ev.topErrors.length ? `<table class="ev-table"><tbody>${ev.topErrors.map(e => `
+          <tr><td><span class="mono ev-code">${esc(e.errorCode)}</span></td>
+              <td class="faint">${esc(svcShort(e.service))} ${esc(e.route || "")}</td>
+              <td class="num right">${nf(e.count)}</td></tr>`).join("")}</tbody></table>`
+          : '<div class="faint">None grouped in this window.</div>'}
+      </section>
 
-    <h5>Sample trace</h5>
-    ${ev.sampleTrace.length ? ev.sampleTrace.map(e => `
-      <div style="font-size:12px;display:flex;gap:9px;padding:2px 0">
-        <span class="faint" style="width:78px">${esc((e.service || "").replace("cognikart-", ""))}</span>
-        <span class="mono" style="flex:1">${esc(e.event)}</span>
-        <span class="num faint">${e.latencyMs != null ? nf(e.latencyMs) + "ms" : ""}</span>
-        <span style="width:34px;text-align:right;color:${(e.httpStatus || 0) >= 500 ? "var(--err)" : "inherit"}">${e.httpStatus ?? ""}</span>
-      </div>`).join("")
-      : '<div class="faint">No trace still buffered for this window.</div>'}
+      <section class="ev">
+        <div class="ev-head">Before vs during</div>
+        <table class="ev-table"><thead><tr><th>Metric</th><th class="right">Before</th><th class="right">During</th></tr></thead><tbody>
+          ${deltaRow("Requests / min", md.requestsPerMin)}
+          ${deltaRow("5xx / min", md.errors5xxPerMin)}
+          ${deltaRow("p95 latency", md.p95LatencyMs, "ms", 0)}
+          ${deltaRow("Retries / min", md.retriesPerMin)}
+          ${deltaRow("Payment attempts / min", md.paymentAttemptsPerMin)}
+          ${deltaRow("Log volume", md.logMibPerMin, " MiB", 3)}
+          ${deltaRow("Instances (max)", md.instanceCountMax, "", 0)}
+        </tbody></table>
+      </section>
 
-    <h5>Explain</h5>
-    <button class="btn primary" data-explain="${esc(id)}">Explain this incident</button>
-    <div class="explain-out" style="margin-top:11px"></div>
+      <section class="ev">
+        <div class="ev-head">Sample trace</div>
+        ${ev.sampleTrace.length ? `<table class="ev-table ev-trace"><tbody>${ev.sampleTrace.map(e => `
+          <tr><td class="faint">${esc(svcShort(e.service))}</td>
+              <td class="mono">${esc(e.event)}</td>
+              <td class="num right faint">${e.latencyMs != null ? nf(e.latencyMs) + "ms" : ""}</td>
+              <td class="num right ${(e.httpStatus || 0) >= 500 ? "bad" : ""}">${e.httpStatus ?? ""}</td></tr>`).join("")}</tbody></table>`
+          : '<div class="faint">No trace still buffered for this window.</div>'}
+      </section>
 
-    <h5>Before vs during</h5>
-    <table><thead><tr><th>Metric</th><th class="right">Before</th><th class="right">During</th></tr></thead><tbody>
-      ${deltaRow("Requests / min", md.requestsPerMin)}
-      ${deltaRow("5xx / min", md.errors5xxPerMin)}
-      ${deltaRow("p95 latency", md.p95LatencyMs, "ms", 0)}
-      ${deltaRow("Retries / min", md.retriesPerMin)}
-      ${deltaRow("Payment attempts / min", md.paymentAttemptsPerMin)}
-      ${deltaRow("Log volume", md.logMibPerMin, " MiB", 3)}
-      ${deltaRow("Instances (max)", md.instanceCountMax, "", 0)}
-    </tbody></table>
+      <section class="ev ev-wide">
+        <div class="ev-head">Timeline</div>
+        <div class="tl">${d.timeline.map(t => `<div class="tl-item ${esc(t.kind)}">
+          <div class="t">${hms(t.ts)} · ${esc(t.kind)}</div>
+          <div class="tl-text">${esc(t.text)}</div></div>`).join("")}</div>
+      </section>
 
-    <h5>Timeline</h5>
-    <div class="tl">${d.timeline.map(t => `<div class="tl-item ${esc(t.kind)}">
-      <div class="t">${hms(t.ts)} · ${esc(t.kind)}</div>
-      <div style="font-size:12.5px">${esc(t.text)}</div></div>`).join("")}</div>`;
+      <section class="ev ev-wide">
+        <div class="ev-head">Explanation</div>
+        <div class="ev-explain">
+          <button class="btn primary" data-explain="${esc(id)}">Explain this incident</button>
+          <span class="faint">Narrated from the evidence above — no new numbers.</span>
+        </div>
+        <div class="explain-out"></div>
+      </section>
+    </div>`;
 }
 
 function wireExplain(root, id) {
@@ -1757,8 +1911,9 @@ function wireExplain(root, id) {
       const r = await api(`/api/v1/incidents/${id}/analyze`, { method: "POST" });
       const g = r.grounding;
       out.innerHTML = `
-        <div style="display:flex;gap:7px;margin-bottom:9px;flex-wrap:wrap">
-          <span class="pill ${r.provider === "vertex-ai" ? "info" : "muted"}">${esc(r.provider)}${r.model ? " · " + esc(r.model) : ""}</span>
+        <div class="explain-tags">
+          ${r.provider === "vertex-ai" ? AI_TAG : `<span class="pill muted">calculated · deterministic</span>`}
+          ${r.model ? `<span class="pill muted">${esc(r.model)}</span>` : ""}
           <span class="pill ${g.grounded ? "ok" : "warn"}"><span class="dot"></span>${g.grounded ? "fully grounded" : g.unsupportedNumbers.length + " unverified number(s)"}</span>
           <span class="pill muted">${g.checkedNumbers} numbers checked</span>
           ${r.cached ? `<span class="pill muted">cached</span>` : ""}

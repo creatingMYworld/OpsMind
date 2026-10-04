@@ -179,9 +179,12 @@
         <span class="tier near">near real time</span> comes from Cloud Monitoring and lags by minutes. Both are real measurements.
       </div>
       <div class="grid g4" id="resCards"></div>
-      <div class="grid g2" style="margin-top:14px">
-        <div class="card"><h3>CPU per service <span class="tier live">live</span></h3><div class="hint">Process CPU from heartbeats.</div><div class="chart-wrap"><canvas id="chCpu"></canvas></div></div>
-        <div class="card"><h3>Memory vs provisioned <span class="tier live">live</span></h3><div class="hint">Resident memory against the container limit — the basis for right-sizing.</div><div class="chart-wrap"><canvas id="chMem"></canvas></div></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Heartbeats</div><h2 class="sec-title">Over time</h2></div><span class="tier live">live</span></div>
+      <div class="grid g2 res-charts">
+        <div class="card chart-card"><h3>CPU utilisation</h3><div class="hint">Process CPU per service, percent of one vCPU.</div><div class="chart-wrap"><canvas id="chCpu"></canvas></div></div>
+        <div class="card chart-card"><h3>Memory</h3><div class="hint">Resident memory per service, MiB — the basis for right-sizing.</div><div class="chart-wrap"><canvas id="chMem"></canvas></div></div>
+        <div class="card chart-card"><h3>In-flight requests</h3><div class="hint">Concurrent requests per service, the Cloud Run scaling signal.</div><div class="chart-wrap"><canvas id="chInflight"></canvas></div></div>
+        <div class="card chart-card"><h3>Instance count</h3><div class="hint">Instances reporting per service, from heartbeat identities.</div><div class="chart-wrap"><canvas id="chInst"></canvas></div></div>
       </div>
       <div class="card" style="margin-top:14px">
         <h3>Cloud Monitoring <span class="tier near">near real time</span></h3>
@@ -211,19 +214,22 @@
           <div id="billed"></div>
         </div>
       </div>
-      <div class="card" style="margin-top:14px">
-        <h3>Optimization Center</h3>
-        <div class="hint" id="recHint">Every recommendation carries evidence, the observed metric, a confidence level and a concrete next action. A saving figure appears only when it can be calculated from published pricing.</div>
-        <div id="recs"></div>
-      </div>
+      <div class="sec-head"><div><div class="eyebrow-label">Optimization Center</div><h2 class="sec-title">What to change</h2></div><span id="optChip"></span></div>
+      <div class="grid g3" id="optTiles"></div>
+      <div class="card opt-summary" id="optSummary"></div>
+      <div class="grid g2 opt-recs" id="recs"></div>
+      <div class="faint opt-note" id="recHint"></div>
     </section>
 
     <!-- ALERTS -->
     <section class="view" id="view-alerts">
       <h2>Alert Thresholds</h2>
       <div class="lede">Editable thresholds — this is the brief's "set alert thresholds" step, implemented inside the product. Changes take effect on the next evaluation.</div>
-      <div class="card" id="alertSources" style="margin-bottom:14px"></div>
-      <div id="alertList"></div>
+      <div class="grid g4" id="alertTiles"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Delivery</div><h2 class="sec-title">Where alerts come from</h2></div></div>
+      <div class="grid g2" id="alertSources"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Rules</div><h2 class="sec-title">Thresholds</h2></div><span id="alertChip"></span></div>
+      <div id="alertList" class="rule-list"></div>
     </section>
 
     <!-- PROJECTS -->
