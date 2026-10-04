@@ -1,0 +1,47 @@
+# Cloud Build pipeline for OpsMind: build the image, push it to Artifact
+# Registry, roll it out to the existing Cloud Run service.
+#
+# The deploy step changes ONLY the image. It deliberately passes no
+# --set-env-vars, --service-account or scaling flags: the running service
+# keeps everything it already has (DASHBOARD_TOKEN, AI_ENABLED,
+# WATCHED_SERVICES, the read-only sa-opsmind identity). --set-env-vars would
+# replace the whole environment and lock everyone out of the dashboard.
+#
+# One-time setup (Cloud Shell):
+#   PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format 'value(projectNumber)')
+#   CB_SA="$PROJECT_NUMBER@cloudbuild.gserviceaccount.com"
+#   gcloud projects add-iam-policy-binding $PROJECT_ID --member "serviceAccount:$CB_SA" --role roles/run.admin --condition=None --quiet
+#   gcloud iam service-accounts add-iam-policy-binding sa-opsmind@$PROJECT_ID.iam.gserviceaccount.com --member "serviceAccount:$CB_SA" --role roles/iam.serviceAccountUser --quiet
+# Then connect the GitHub repo in Cloud Build and create a trigger on the
+# branch to deploy (main, or opsmind-staging), pointing at this file.
+#
+# The Artifact Registry repository "cloud-run-source-deploy" already exists:
+# `gcloud run deploy --source .` created it on the first manual deploy.
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build'
+    args: ['build', '-t', '$_IMAGE', '-t', '$_IMAGE_LATEST', '.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push'
+    args: ['push', '--all-tags', '$_IMAGE_BASE']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy'
+    entrypoint: 'gcloud'
+    args: ['run', 'deploy', '$_SERVICE', '--image', '$_IMAGE', '--region', '$_REGION', '--quiet']
+
+substitutions:
+  _SERVICE: 'opsmind-portal'
+  _REGION: 'asia-south1'
+  _IMAGE_BASE: '${_REGION}-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/opsmind-portal'
+  _IMAGE: '${_IMAGE_BASE}:${SHORT_SHA}'
+  _IMAGE_LATEST: '${_IMAGE_BASE}:latest'
+
+images:
+  - '$_IMAGE'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  dynamicSubstitutions: true
