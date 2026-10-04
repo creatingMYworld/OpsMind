@@ -29,6 +29,13 @@ chosen.
 - **Top bar**: page title and subtitle (read from the active view's own
   heading, which is hidden), project picker, time window, live cadence,
   Refresh (spinning, then "Refreshed"), notifications, theme.
+- **Dropdowns** (project picker, time window, every log filter) are pills
+  around a hidden native `<select>`, which stays the source of truth: code
+  sets `.value`, rebuilds options and listens for `change` as usual.
+  `enhanceSelect()` in `app.js` draws a themed menu instead of the OS list,
+  opens from a click anywhere on the pill, works from the keyboard (Enter,
+  arrows, Escape), and re-renders rather than closes when a live refresh
+  rebuilds the options.
 - **Project picker** lists every project OpsMind can see; ones without log
   access are disabled. It switches with `POST /api/v1/projects/select`, the
   same call as Setup's Open button.

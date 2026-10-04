@@ -926,3 +926,72 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
 .narr { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
 .narr-blk p { margin: 4px 0 0; font-size: 13px; line-height: 1.65; color: var(--text); }
 .narr .ev-k { text-transform: uppercase; }
+
+/* ---------- dropdowns (themed menu over a hidden native select) ---------- */
+.dd { position: relative; gap: 7px; }
+.dd select { display: none !important; }
+.dd:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dd[aria-expanded="true"] { border-color: var(--accent); }
+.dd[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
+.dd > svg:last-child { transition: transform .15s; flex: none; color: var(--text-faint); }
+.dd-value {
+  color: var(--text); font: 600 13px/1 var(--sans); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.tb-project .dd-value { max-width: 180px; }
+.tb-window .dd-value { min-width: 74px; }
+.fsel { height: 34px; }
+.fsel .dd-value { font-size: 12.5px; max-width: 132px; }
+.dd-menu {
+  position: fixed; z-index: 90; max-width: 320px; max-height: min(360px, 60vh); overflow-y: auto;
+  padding: 5px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--bg-elev); box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+  display: flex; flex-direction: column; gap: 1px;
+}
+:root[data-theme="light"] .dd-menu { box-shadow: 0 12px 32px rgba(15, 23, 42, .14); }
+.dd-opt {
+  all: unset; box-sizing: border-box; display: flex; align-items: center; width: 100%;
+  padding: 8px 10px 8px 26px; border-radius: 7px; position: relative;
+  font: 500 13px/1.3 var(--sans); color: var(--text-dim); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dd-opt:hover, .dd-opt:focus-visible { background: var(--bg-elev2); color: var(--text); }
+.dd-opt.on { color: var(--text); font-weight: 600; }
+.dd-opt.on::before {
+  content: ""; position: absolute; left: 10px; top: 50%; width: 6px; height: 6px;
+  margin-top: -3px; border-radius: 50%; background: var(--accent);
+}
+.dd-opt[disabled] { color: var(--text-faint); cursor: default; opacity: .6; }
+.dd-opt[disabled]:hover { background: none; }
+.dd-sep { height: 1px; margin: 4px 6px; background: var(--border-soft); }
+
+/* ---------- top bar: the title gives way, the controls stay on one row ---------- */
+.topbar { flex-wrap: nowrap; }
+.tb-title { flex: 1 1 0; }
+.tb-title .tb-name, .tb-title .tb-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .spacer { display: none; }
+.topbar > :not(.tb-title) { flex: none; }
+@media (max-width: 860px) { .topbar { flex-wrap: wrap; } }
+
+/* ---------- log filters: one grid, equal pills ---------- */
+.filterbar {
+  display: grid; align-items: center; gap: 8px;
+  grid-template-columns: minmax(170px, 1.4fr) repeat(5, minmax(0, 1fr)) auto;
+}
+.filterbar .fsearch { width: 100%; min-width: 0; }
+.filterbar .fsel { min-width: 0; justify-content: space-between; }
+.filterbar .fsel .fsel-k { flex: none; }
+.filterbar .fsel .dd-value { flex: 1; max-width: none; text-align: left; }
+.fend { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.filterbar .fcount { margin-left: 0; white-space: nowrap; }
+@media (max-width: 1300px) {
+  .filterbar { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .filterbar .fsearch { grid-row: 1; grid-column: 1 / 4; }
+  .filterbar .fend { grid-row: 1; grid-column: 4 / 6; }
+  .filterbar .fsel { grid-row: 2; }
+}
+@media (max-width: 700px) {
+  .filterbar { grid-template-columns: 1fr 1fr; }
+  .filterbar .fsearch, .filterbar .fend { grid-column: 1 / -1; grid-row: auto; }
+  .filterbar .fsel { grid-row: auto; }
+}

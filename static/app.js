@@ -1955,16 +1955,109 @@ function narrativeHtml(text) {
     <p>${esc(b.body.join(" "))}</p></div>`).join("")}</div>`;
 }
 
-/* A dropdown is a pill (a <label>) around a native <select>. Only the value
-   text used to open it; a click anywhere on the pill now does. */
+/* ---------- dropdowns ----------
+   Every dropdown is a pill (a <label>) around a native <select>. The select
+   stays the source of truth -- code sets .value, rebuilds options and listens
+   for "change" exactly as before -- but its OS-drawn list is replaced by a
+   themed menu: same fonts and sizing in both themes, full option text, and it
+   is built when opened, so a live refresh rebuilding the options cannot close
+   it under the reader. */
+const dd = { open: null };
+function ddLabel(sel) {
+  const o = sel.options[sel.selectedIndex];
+  const v = sel.closest(".dd").querySelector(".dd-value");
+  v.textContent = o ? o.text : "";
+  v.title = v.textContent;
+}
+function ddClose() {
+  if (!dd.open) return;
+  dd.open.pill.setAttribute("aria-expanded", "false");
+  dd.open.menu.remove();
+  dd.open = null;
+}
+function ddRender(sel, menu) {
+  menu.innerHTML = [...sel.options].map((o, i) => /^─+$/.test(o.text)
+    ? `<div class="dd-sep" role="separator"></div>`
+    : `<button type="button" role="option" class="dd-opt${i === sel.selectedIndex ? " on" : ""}" data-i="${i}"
+         aria-selected="${i === sel.selectedIndex}"${o.disabled ? " disabled" : ""}>${esc(o.text)}</button>`).join("");
+}
+function ddOpen(pill, sel) {
+  ddClose();
+  const menu = document.createElement("div");
+  menu.className = "dd-menu"; menu.setAttribute("role", "listbox");
+  ddRender(sel, menu);
+  document.body.appendChild(menu);
+  // Fixed to the viewport so no scrolling or clipping container hides it.
+  const r = pill.getBoundingClientRect();
+  menu.style.minWidth = r.width + "px";
+  menu.style.top = (r.bottom + 6) + "px";
+  const left = Math.min(r.left, innerWidth - menu.offsetWidth - 8);
+  menu.style.left = Math.max(8, left) + "px";
+  menu.addEventListener("click", e => {
+    const b = e.target.closest(".dd-opt");
+    if (!b || b.disabled) return;
+    const i = +b.dataset.i;
+    ddClose(); pill.focus();
+    if (i !== sel.selectedIndex) {
+      sel.selectedIndex = i;
+      ddLabel(sel);
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+  pill.setAttribute("aria-expanded", "true");
+  dd.open = { pill, sel, menu };
+  (menu.querySelector(".dd-opt.on") || menu.querySelector(".dd-opt:not([disabled])"))?.focus();
+}
+function enhanceSelect(sel) {
+  const pill = sel.closest(".tb-project, .tb-window, .fsel");
+  if (!pill || pill.classList.contains("dd")) return;
+  pill.classList.add("dd");
+  pill.tabIndex = 0;
+  pill.setAttribute("role", "combobox");
+  pill.setAttribute("aria-haspopup", "listbox");
+  pill.setAttribute("aria-expanded", "false");
+  if (sel.getAttribute("aria-label")) pill.setAttribute("aria-label", sel.getAttribute("aria-label"));
+  const v = document.createElement("span");
+  v.className = "dd-value";
+  sel.after(v);
+  sel.tabIndex = -1;
+  // Keep the visible text in step with every way the value can change:
+  // assignment, rebuilt options, or a user choice.
+  const proto = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+  Object.defineProperty(sel, "value", {
+    get() { return proto.get.call(sel); },
+    set(x) { proto.set.call(sel, x); ddLabel(sel); },
+  });
+  new MutationObserver(() => {
+    ddLabel(sel);
+    if (dd.open && dd.open.sel === sel) ddRender(sel, dd.open.menu);
+  }).observe(sel, { childList: true, subtree: true, attributes: true });
+  sel.addEventListener("change", () => ddLabel(sel));
+  pill.addEventListener("click", e => {
+    e.preventDefault();
+    if (sel.disabled) return;
+    if (dd.open && dd.open.pill === pill) ddClose(); else ddOpen(pill, sel);
+  });
+  pill.addEventListener("keydown", e => {
+    if (["Enter", " ", "ArrowDown"].includes(e.key) && !dd.open) { e.preventDefault(); ddOpen(pill, sel); }
+  });
+  ddLabel(sel);
+}
 document.addEventListener("click", e => {
-  const pill = e.target.closest(".tb-project, .tb-window, .fsel");
-  if (!pill || e.target.tagName === "SELECT") return;
-  const sel = pill.querySelector("select");
-  if (!sel || sel.disabled) return;
-  e.preventDefault();
-  try { sel.showPicker(); } catch { sel.focus(); }
+  if (dd.open && !dd.open.pill.contains(e.target) && !dd.open.menu.contains(e.target)) ddClose();
 });
+document.addEventListener("keydown", e => {
+  if (!dd.open) return;
+  const opts = [...dd.open.menu.querySelectorAll(".dd-opt:not([disabled])")];
+  const i = opts.indexOf(document.activeElement);
+  if (e.key === "Escape") { e.stopPropagation(); const p = dd.open.pill; ddClose(); p.focus(); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); opts[Math.min(opts.length - 1, i + 1)]?.focus(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); opts[Math.max(0, i - 1)]?.focus(); }
+  else if (e.key === "Tab") ddClose();
+}, true);
+addEventListener("resize", ddClose);
+document.addEventListener("scroll", e => { if (dd.open && !dd.open.menu.contains(e.target)) ddClose(); }, true);
+$$(".tb-project select, .tb-window select, .fsel select").forEach(enhanceSelect);
 
 /* Opened from the action queue, which links to a specific incident. */
 async function showIncident(id) {
