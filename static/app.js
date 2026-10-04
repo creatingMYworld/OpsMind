@@ -105,6 +105,10 @@ function applyRoute() {
   $$("#nav button").forEach(x => x.classList.toggle("active", x.dataset.view === state.view));
   $$(".view").forEach(v => v.classList.remove("active"));
   $("#view-" + state.view).classList.add("active");
+  const head = $("#view-" + state.view + " > h2:first-child");
+  const lede = head && head.nextElementSibling && head.nextElementSibling.classList.contains("lede") ? head.nextElementSibling : null;
+  $("#pageTitle").textContent = head ? head.childNodes[0].textContent.trim() : "";
+  $("#pageSub").textContent = lede ? lede.textContent.trim() : "";
 
   // A drill-down carries its filters; adopt them before the view renders.
   if (state.view === "logs") {
@@ -142,7 +146,7 @@ function scheduleRefresh() {
   const sel = $("#windowSel");
   if (sel) sel.title = `Re-polled every ${Math.round(ms / 1000)}s at this window`;
   const lbl = $("#liveLabel");
-  if (lbl) lbl.textContent = `live ${Math.round(ms / 1000)}s`;
+  if (lbl) lbl.textContent = `Live ${Math.round(ms / 1000)}s`;
 }
 $("#themeBtn").addEventListener("click", () => {
   const root = document.documentElement;
@@ -259,26 +263,32 @@ const svcShort = n => String(n || "").replace(/^cognikart-/, "");
 function chip(text, tone) {
   return `<span class="sec-chip" style="--chip:var(${tone})"><span class="dot"></span>${esc(text)}</span>`;
 }
-function linkTile({ label, value, valueColor, foot, href }) {
+function linkTile({ label, value, valueColor, foot, href, spark, sparkColor }) {
   return `<a class="card ktile" href="${href}">
     <div class="ktile-label">${esc(label)}<span class="ktile-go" aria-hidden="true">→</span></div>
-    <div class="ktile-row"><div class="ktile-value"${valueColor ? ` style="color:var(${valueColor})"` : ""}>${value}</div></div>
+    <div class="ktile-row"><div class="ktile-value"${valueColor ? ` style="color:var(${valueColor})"` : ""}>${value}</div>
+      ${spark ? sparkline(spark, sparkColor) : ""}</div>
     <div class="ktile-foot">${foot}</div></a>`;
 }
 function renderFailing({ t, points, routes, actions }) {
-  const cpu = points.map(p => p.cpuPctMax).filter(v => v != null);
+  const cpuSeries = points.map(p => p.cpuPctMax);
+  const cpu = cpuSeries.filter(v => v != null);
   const inst = points.map(p => p.instanceCount).filter(v => v != null);
-  const cpuNow = cpu.length ? Math.max(...cpu.slice(-5)) : null;
+  const cpuNow = cpu.length ? cpu[cpu.length - 1] : null;
   $("#failTiles").innerHTML = [
     linkTile({ label: "Server errors (5xx)", value: nf(t.errors5xx), valueColor: t.errors5xx ? "--err" : null,
+               spark: points.map(p => p.errors5xx || 0), sparkColor: "--err",
                foot: `${pct(t.errorRatePct, 2)} of traffic · our fault`, href: "#logs?severity=ERROR" }),
     linkTile({ label: "Client errors (4xx)", value: nf(t.errors4xx), valueColor: t.errors4xx ? "--warn" : null,
+               spark: points.map(p => p.errors4xx || 0), sparkColor: "--warn",
                foot: `${pct(t.clientErrorRatePct, 2)} of traffic · caller side`, href: "#logs?severity=WARNING" }),
     linkTile({ label: "Slow requests", value: routes ? nf(routes.slowRequests) : "—",
-               foot: routes ? `took longer than ${nf(routes.slowThresholdMs)}ms` : "route data unavailable", href: "#services" }),
-    linkTile({ label: "Infrastructure", value: cpuNow == null ? "—" : `${nf(cpuNow, 0)}% CPU`,
+               spark: points.map(p => p.p95LatencyMs || 0), sparkColor: "--accent",
+               foot: routes ? `over ${nf(routes.slowThresholdMs)}ms · line is p95 latency` : "route data unavailable", href: "#services" }),
+    linkTile({ label: "CPU utilization", value: cpuNow == null ? "—" : `${nf(cpuNow, 0)}%`,
                valueColor: cpuNow > 80 ? "--err" : cpuNow > 60 ? "--warn" : null,
-               foot: inst.length ? `${nf(Math.max(...inst))} instance(s) · peak, last 5 min` : "no heartbeats yet", href: "#resources" }),
+               spark: cpu.length > 1 ? cpuSeries.map(v => v ?? 0) : null, sparkColor: "--info",
+               foot: cpu.length ? `${nf(Math.max(...inst, 0))} instance(s) · peak per minute` : "no CPU heartbeats yet", href: "#resources" }),
   ].join("");
 
   const firing = (actions && actions.actions) || [];
@@ -295,13 +305,18 @@ const SEV_GROUPS = [
 ];
 function sevOf(p, g) { return g.from.reduce((s, k) => s + ((p.severity || {})[k] || 0), 0); }
 
-function renderSeverity(points) {
+function renderSeverity(allPoints) {
+  // The current minute is still filling; drawn as a bar it reads as a sudden
+  // drop in traffic. It is left out of the chart, not out of the totals.
+  const nowMin = Math.floor(Date.now() / 60000);
+  const points = allPoints.filter(p => Math.floor(p.ts / 60) < nowMin);
   const labels = points.map(p => hhmm(p.ts));
   upsert("severity", "chSeverity", "bar", {
     labels,
     datasets: SEV_GROUPS.map(g => ({
       label: g.label, data: points.map(p => sevOf(p, g)),
-      backgroundColor: css(g.color), stack: "s", borderRadius: 1, barPercentage: .78, categoryPercentage: .9,
+      backgroundColor: g.key === "INFO" ? css("--text-faint") + "8c" : css(g.color),
+      stack: "s", borderRadius: 2, barPercentage: .62, categoryPercentage: .9, maxBarThickness: 26,
     })),
   }, {
     plugins: { legend: { display: false } },
@@ -313,11 +328,11 @@ function renderSeverity(points) {
   $("#sevLegend").innerHTML = SEV_GROUPS.map(g =>
     `<span><i style="background:var(${g.color})"></i>${g.label}</span>`).join("");
 
-  const totals = SEV_GROUPS.map(g => ({ ...g, n: points.reduce((s, p) => s + sevOf(p, g), 0) }));
+  const totals = SEV_GROUPS.map(g => ({ ...g, n: allPoints.reduce((s, p) => s + sevOf(p, g), 0) }));
   const all = totals.reduce((s, x) => s + x.n, 0) || 1;
-  const req = points.reduce((s, p) => s + (p.requests || 0), 0);
-  const e5 = points.reduce((s, p) => s + (p.errors5xx || 0), 0);
-  const e4 = points.reduce((s, p) => s + (p.errors4xx || 0), 0);
+  const req = allPoints.reduce((s, p) => s + (p.requests || 0), 0);
+  const e5 = allPoints.reduce((s, p) => s + (p.errors5xx || 0), 0);
+  const e4 = allPoints.reduce((s, p) => s + (p.errors4xx || 0), 0);
   $("#sevSplit").innerHTML = totals.map(x => `
     <a class="sev-row" href="#logs?severity=${x.key === "INFO" ? "INFO" : x.key}">
       <div class="sev-top"><span class="sev-tag" style="--c:var(${x.color})"><span class="dot"></span>${x.label}</span>
@@ -500,15 +515,7 @@ async function loadOverview() {
 
   renderFunnel(f);
 
-  $("#ovIncidents").innerHTML = o.incidents.openCount === 0
-    ? `<div class="empty">No active incidents.</div>`
-    : o.incidents.open.map(incRow).join("");
-  $$("#ovIncidents [data-inc]").forEach(e => e.addEventListener("click", () => showIncident(e.dataset.inc)));
-
-  $("#ovRecs").innerHTML = o.recommendations.total === 0
-    ? `<div class="empty">No recommendations in this window.</div>`
-    : o.recommendations.top.map(recCard).join("") +
-      `<div class="faint" style="font-size:12px">${o.recommendations.total} total — see Cost &amp; Optimization.</div>`;
+  renderRecSummary(o.recommendations);
 
   if (o.actions) renderActions(o.actions);
 
@@ -530,10 +537,10 @@ function renderActions(q) {
   const pill = $("#actionCount");
   pill.className = n ? "pill info explain-pill" : "pill ok";
   pill.innerHTML = n
-    ? `<span aria-hidden="true">✦</span> ${ai ? "AI explanation available" : "Explanation available"}`
+    ? `<span aria-hidden="true">✦</span> ${ai ? "AI explanation · Gemini on Vertex AI" : "Explanation available"}`
     : "all clear";
   pill.title = n
-    ? (ai ? `Open an incident and press Explain for a grounded write-up (${state.meta.config.aiModel || "model"}).`
+    ? (ai ? `Open an incident and press Explain. Powered by ${state.meta.config.aiModel || "Gemini"} on Vertex AI, checked against the incident's own numbers.`
           : "Open an incident and press Explain. AI is off, so the write-up is built directly from the evidence.")
     : "";
   pill.onclick = n ? () => go("incidents") : null;
@@ -694,6 +701,19 @@ function incRow(i) {
       ${rev ? ` &nbsp;·&nbsp; <span class="muted">revenue at risk</span> <span class="saving">${inr(rev)}</span>` : ""}
     </div></div>`;
 }
+/* Two lines: how many actions and what they save; then the biggest one. */
+function renderRecSummary(rec) {
+  const box = $("#ovRecs");
+  if (!rec || !rec.total) { box.innerHTML = `<span class="faint">No cost-saving actions in this window.</span>`; return; }
+  const top = rec.top || [];
+  const saving = top.reduce((s, r) => s + (r.estimatedSavingUsdPerMonth || 0), 0);
+  const first = top[0];
+  box.innerHTML =
+    `<div class="recs-line"><strong>${nf(rec.total)} action${rec.total === 1 ? "" : "s"}</strong>` +
+    (saving > 0 ? ` could save about <strong class="saving">${usd(saving, 2)}/month</strong>.` : " open, savings not yet estimable.") +
+    `</div><div class="recs-line faint">Biggest: ${esc(first ? first.title : "—")}. <span class="recs-go">See all in Cost →</span></div>`;
+}
+
 function recCard(r) {
   const sav = r.estimatedSavingUsdPerMonth !== null
     ? `<span class="saving">${usd(r.estimatedSavingUsdPerMonth, 4)}/mo</span>`
@@ -1475,9 +1495,11 @@ async function showIncident(id) {
 
 $("#refreshBtn").addEventListener("click", async () => {
   const b = $("#refreshBtn");
-  b.disabled = true; b.textContent = "⟳ …";
+  const label = b.querySelector("span");
+  b.disabled = true; b.classList.add("spinning"); label.textContent = "Refreshing";
   await refresh();
-  b.disabled = false; b.textContent = "⟳ Refresh";
+  b.classList.remove("spinning"); b.disabled = false; label.textContent = "Refreshed";
+  setTimeout(() => { label.textContent = "Refresh"; }, 1400);
 });
 
 let notifOpen = false;
