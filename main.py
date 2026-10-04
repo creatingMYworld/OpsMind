@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import secrets
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -33,6 +34,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .collectors import local as local_collector
 from .collectors.evaluator import evaluator
+from . import history
 from .config import settings
 from .engine import cost as cost_engine
 from .engine import kpi as kpi_engine
@@ -139,6 +141,42 @@ def _startup() -> None:
         from .collectors.gcp_metrics import collector as metric_collector
         log_collector.start()
         metric_collector.start()
+    if history.enabled():
+        _history_writer.start()
+
+
+class _HistoryWriter:
+    """Folds the live store into Firestore on its own thread.
+
+    Deliberately not on the request path and deliberately not awaited: a slow
+    or unreachable Firestore must cost the dashboard nothing. Every failure is
+    swallowed here and reported through /api/v1/meta instead.
+    """
+
+    def __init__(self) -> None:
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._loop, daemon=True,
+                                        name="history-writer")
+        self._thread.start()
+
+    def _loop(self) -> None:
+        # One interval of grace, so the first write has real minutes to fold
+        # rather than writing an almost-empty day the moment the portal boots.
+        time.sleep(min(settings.history_write_interval_s, 60.0))
+        while True:
+            try:
+                rate = cost_engine.rate(store, window_minutes=15)
+                history.write_rollup(store, rate.get("usdPerHour"))
+            except Exception:  # noqa: BLE001 - history must never break live
+                pass
+            time.sleep(max(settings.history_write_interval_s, 30.0))
+
+
+_history_writer = _HistoryWriter()
 
 
 # --- health ---------------------------------------------------------------
@@ -184,6 +222,7 @@ def meta() -> Dict[str, Any]:
             "note": "CogniKart posts log lines directly; set DATA_SOURCE=gcp "
                     "to read Cloud Logging instead.",
         }
+    collectors["history"] = history.status()
     return {
         "product": "OpsMind",
         "observes": "CogniKart",
@@ -725,6 +764,26 @@ def cost_summary(window: int = Query(30, ge=1, le=180)) -> Dict[str, Any]:
                               "observedValue", "unit")} for r in recs],
     }
     return explainer.summarize_cost(ctx)
+
+
+@app.get("/api/v1/history/compare")
+def history_compare(project: Optional[str] = None) -> Dict[str, Any]:
+    """Today against yesterday, from the Firestore daily rollups.
+
+    Returns `available: false` with a message when there is not a full day on
+    both sides. Nothing is estimated to fill a gap -- a comparison against a
+    day that was not observed would be worse than no comparison.
+    """
+    return history.compare(project)
+
+
+@app.get("/api/v1/history/days")
+def history_days(project: Optional[str] = None,
+                 days: int = Query(7, ge=2, le=30)) -> Dict[str, Any]:
+    """The last N daily rollups, oldest first. Days with no data are omitted
+    rather than zero-filled, because a day the portal was not running is not
+    a day with no traffic."""
+    return history.recent(project, days)
 
 
 @app.get("/api/v1/recommendations")

@@ -54,6 +54,45 @@ make the dashboard lie, so every panel says which tier it is on:
   number it emits is checked against the evidence bundle, and a deterministic
   fallback always exists.
 
+## Historical data (optional)
+
+Everything above works with no database: Cloud Logging is the durable store and
+the portal keeps a bounded in-memory working set. That working set holds
+minutes, so it can never answer "is today worse than yesterday?".
+
+Firestore is added for that one job, and nothing else. **Raw logs are never
+written to it.** One small document per project per day holds counters and
+averages — requests, 4xx/5xx, latency, CPU, memory, instances, log volume, a
+cost snapshot and per-service totals — plus one document per incident. A busy
+day is a few kilobytes.
+
+It is **off by default** and failure-tolerant by design: the writer runs on its
+own thread, every call is wrapped, and if Firestore is unreachable the
+dashboard behaves exactly as it did before. With fewer than two days of data
+the panel reads "Historical data is being collected" — no day is ever
+estimated to fill a gap.
+
+### Turning it on
+
+```bash
+gcloud services enable firestore.googleapis.com
+```
+
+```bash
+gcloud firestore databases create --location=asia-south1 --type=firestore-native
+```
+
+```bash
+gcloud projects add-iam-policy-binding $PROJECT_ID --member "serviceAccount:$SA_MIND" --role roles/datastore.user --condition=None
+```
+
+Then redeploy with `HISTORY_ENABLED=true`. `roles/datastore.user` is the
+Firestore role — the product was formerly Cloud Datastore and the role name
+never changed.
+
+Read it at `/api/v1/history/compare` and `/api/v1/history/days`, or look at
+**Today vs yesterday** on the Overview page.
+
 ## Deploy
 
 See **[DEPLOY.md](DEPLOY.md)**. Unlike the application it watches, OpsMind
@@ -90,3 +129,9 @@ reading Cloud Logging, so the whole portal works with no GCP project at all.
 | `AI_ENABLED` | `true` turns on the Gemini explanation. Off by default |
 | `LOGS_POLL_INTERVAL_S` | Cloud Logging poll cadence, default 4s |
 | `METRICS_POLL_INTERVAL_S` | Cloud Monitoring poll cadence, default 60s |
+| `HISTORY_ENABLED` | `true` writes daily rollups to Firestore. Off by default |
+| `FIRESTORE_DATABASE` | Firestore database id, default `(default)` |
+| `HISTORY_COLLECTION` | Daily rollups collection, default `opsmind_daily` |
+| `HISTORY_EVENTS_COLLECTION` | Incident history collection, default `opsmind_incidents` |
+| `HISTORY_WRITE_INTERVAL_S` | How often a rollup is written, default 300s |
+| `HISTORY_TZ_OFFSET_MINUTES` | Which clock ends the day, default 330 (IST). UTC would roll over at 05:30 local |

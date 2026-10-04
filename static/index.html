@@ -107,6 +107,15 @@
       </div>
 
       <div class="sec-head">
+        <div><div class="eyebrow-label">History</div><h2 class="sec-title">Today vs yesterday</h2></div>
+        <span class="sec-right"><span id="histChip"></span></span>
+      </div>
+      <div class="card flush" id="histCard">
+        <div class="hint" id="histHint" style="padding:12px 14px 0"></div>
+        <div style="overflow-x:auto"><table id="histTable" class="svc-table"></table></div>
+      </div>
+
+      <div class="sec-head">
         <div><div class="eyebrow-label">Breakdown</div><h2 class="sec-title">Health by service</h2></div>
         <span class="sec-right"><span id="svcChip"></span><a class="sec-link" href="#services">All services →</a></span>
       </div>
@@ -343,7 +352,7 @@
   <div class="guide-body" id="guideBody"></div>
   <div class="guide-foot">
     <input type="text" id="guideInput" placeholder="What does the Incidents view show?">
-    <button class="btn primary" id="guideSend">Ask</button>
+    <button class="btn primary" id="guideSend" disabled>Ask</button>
   </div>
 </aside>
 

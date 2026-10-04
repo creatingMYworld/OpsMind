@@ -570,11 +570,67 @@ function renderStatusStrip(o, cls) {
 }
 
 /* ---------- overview ---------- */
+/* ---------- today vs yesterday (Firestore history) ----------
+   Rendered from the daily rollups. It never estimates a missing day: with
+   fewer than two days of data the panel says it is still collecting, because
+   a comparison against a day nobody observed is worse than no comparison. */
+const HIST_ROWS = [
+  { key: "requests", label: "Requests", fmt: v => nf(v) },
+  { key: "errors", label: "Errors (4xx + 5xx)", fmt: v => nf(v), worseUp: true },
+  { key: "errors5xx", label: "Server errors (5xx)", fmt: v => nf(v), worseUp: true },
+  { key: "p95LatencyMs", label: "Latency (mean of per-minute p95)", fmt: v => nf(v) + " ms", worseUp: true },
+  { key: "cpuPct", label: "CPU", fmt: v => pct(v) , worseUp: true },
+  { key: "memoryMb", label: "Memory", fmt: v => nf(v) + " MB", worseUp: true },
+  { key: "logMib", label: "Log volume", fmt: v => nf(v, 2) + " MiB", worseUp: true },
+  { key: "checkoutsConfirmed", label: "Checkouts confirmed", fmt: v => nf(v) },
+  { key: "modeledUsdPerHour", label: "Modeled cost", fmt: v => "$" + nf(v, 4) + "/hr", worseUp: true },
+];
+
+function histDelta(m, worseUp) {
+  if (m.changePct === null || m.changePct === undefined)
+    return `<span class="faint">${esc(m.reason || "—")}</span>`;
+  const up = m.changePct > 0;
+  const bad = worseUp ? up : !up;
+  const tone = Math.abs(m.changePct) < 1 ? "--text-faint" : (bad ? "--err" : "--ok");
+  return `<span style="color:var(${tone})">${up ? "+" : ""}${m.changePct}%</span>`;
+}
+
+async function loadHistory() {
+  const card = $("#histCard"), hint = $("#histHint"), table = $("#histTable");
+  if (!card) return;
+  let h;
+  try { h = await api("/api/v1/history/compare"); }
+  catch (e) { h = { available: false, message: "Historical data is being collected." }; }
+
+  if (!h.available) {
+    $("#histChip").innerHTML = chip(h.enabled ? "collecting" : "not enabled", "--text-faint");
+    hint.hidden = false;
+    hint.textContent = h.message || "Historical data is being collected.";
+    table.innerHTML = "";
+    return;
+  }
+  $("#histChip").innerHTML = chip(`${esc(h.today.date)} vs ${esc(h.yesterday.date)}`, "--ok");
+  hint.hidden = false;
+  hint.textContent = h.note || "";
+  table.innerHTML =
+    `<thead><tr><th>Metric</th><th class="right">Today</th><th class="right">Yesterday</th><th class="right">Change</th></tr></thead><tbody>` +
+    HIST_ROWS.map(r => {
+      const m = (h.metrics || {})[r.key] || {};
+      if (m.today === null && m.yesterday === null) return "";
+      return `<tr><td>${esc(r.label)}</td>
+        <td class="num">${m.today === null || m.today === undefined ? "—" : r.fmt(m.today)}</td>
+        <td class="num">${m.yesterday === null || m.yesterday === undefined ? "—" : r.fmt(m.yesterday)}</td>
+        <td class="num">${histDelta(m, r.worseUp)}</td></tr>`;
+    }).join("") +
+    `</tbody>`;
+}
+
 async function loadOverview() {
   const [o, f] = await Promise.all([
     api(`/api/v1/overview?window=${state.window}`),
     api(`/api/v1/funnel?window=${state.window}`),
   ]);
+  loadHistory();   // not awaited: history must never delay the live overview
   const h = o.health, t = o.technical, b = o.business, c = o.cost;
 
   const cls = setHealthPill(h);
@@ -2189,7 +2245,13 @@ async function refresh() {
   if (!fab || !panel) return;
   const body = document.getElementById("guideBody");
   const input = document.getElementById("guideInput");
+  const sendBtn = document.getElementById("guideSend");
   let greeted = false;
+
+  /* Ask is disabled while the box is empty. It used to accept the click and
+     silently return, which reads as a broken button -- the placeholder is a
+     real question, so an empty box looks like a filled one. */
+  const syncSend = () => { sendBtn.disabled = !input.value.trim(); };
 
   const esc2 = (t) => String(t ?? "").replace(/[&<>"']/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -2216,7 +2278,7 @@ async function refresh() {
       wrap.innerHTML = (m.suggestions || []).slice(0, 5)
         .map(q => `<span class="g-chip">${esc2(q)}</span>`).join("");
       wrap.querySelectorAll(".g-chip").forEach(c =>
-        c.addEventListener("click", () => { input.value = c.textContent; send(); }));
+        c.addEventListener("click", () => { input.value = c.textContent; syncSend(); send(); }));
       body.appendChild(wrap);
     } catch (e) { say("them", "Ask me about OpsMind."); }
   }
@@ -2225,6 +2287,7 @@ async function refresh() {
     const q = input.value.trim();
     if (!q) return;
     input.value = "";
+    syncSend();
     say("me", q);
     const pending = say("them", "…");
     try {
@@ -2246,6 +2309,8 @@ async function refresh() {
     if (!panel.hidden) { greet(); input.focus(); }
   });
   document.getElementById("guideClose").addEventListener("click", () => panel.hidden = true);
-  document.getElementById("guideSend").addEventListener("click", send);
+  sendBtn.addEventListener("click", send);
+  input.addEventListener("input", syncSend);
   input.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+  syncSend();
 })();

@@ -108,6 +108,23 @@ class Settings:
         self.ai_location: str = _env("AI_LOCATION", "global")
         self.ai_timeout_s: float = _env_float("AI_TIMEOUT_S", 12.0)
 
+        # Persistent history in Firestore. Off by default: the live path has
+        # never needed a database, and a portal that cannot reach Firestore
+        # must keep working exactly as before. See opsmind/history.py.
+        self.history_enabled: bool = _env("HISTORY_ENABLED", "false").lower() in (
+            "1", "true", "yes")
+        self.firestore_database: str = _env("FIRESTORE_DATABASE", "(default)")
+        self.history_collection: str = _env("HISTORY_COLLECTION", "opsmind_daily")
+        self.history_events_collection: str = _env(
+            "HISTORY_EVENTS_COLLECTION", "opsmind_incidents")
+        self.history_write_interval_s: float = _env_float(
+            "HISTORY_WRITE_INTERVAL_S", 300.0)
+        # Which clock decides where "today" ends. UTC would roll the day over
+        # at 05:30 local for an asia-south1 deployment, so "yesterday" would
+        # not mean what the person reading the dashboard means. Default is IST.
+        self.history_tz_offset_minutes: int = _env_int(
+            "HISTORY_TZ_OFFSET_MINUTES", 330)
+
         # Optional shared-secret gate for the dashboard. The platform holds
         # read access to your logs, so do not leave it open on a public URL
         # without this set. See docs/DEPLOY.md step 8.
@@ -155,6 +172,7 @@ class Settings:
             "pricingVerifiedOn": self.pricing.get("verifiedOn"),
             "logsPollIntervalS": self.logs_poll_interval_s,
             "metricsPollIntervalS": self.metrics_poll_interval_s,
+            "historyEnabled": self.history_enabled,
         }
 
 

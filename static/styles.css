@@ -1030,3 +1030,4 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
   margin: 0 6px 6px 0; cursor: pointer;
 }
 .g-chip:hover { border-color: var(--accent); color: var(--text); }
+.guide-foot .btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }

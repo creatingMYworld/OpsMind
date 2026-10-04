@@ -339,7 +339,89 @@ generating, and reading is free.
 
 ---
 
-## Part 10 — Redeploy after an update
+## Part 10 — Optional: persistent history in Firestore
+
+Everything else works without this. Cloud Logging is the durable store; the
+portal's in-memory working set holds **minutes**, which is why it cannot answer
+"is today worse than yesterday?". Firestore is added for that one question.
+
+**Raw logs are never written to Firestore.** One document per project per day
+holds counters and averages — requests, 4xx/5xx, latency, CPU, memory,
+instances, log volume, a cost snapshot and per-service totals — plus one
+document per incident. A busy day is a few kilobytes.
+
+**Step 1 — restore the shell variables** (§0 of `DECISIONS.md`), then:
+
+```bash
+gcloud services enable firestore.googleapis.com
+```
+
+**Step 2 — create the database.** One per project; `firestore-native` is the
+mode you want, and the location cannot be changed afterwards.
+
+```bash
+gcloud firestore databases create --location=asia-south1 --type=firestore-native
+```
+
+If it reports the database already exists, that is a success — skip on.
+
+**Step 3 — grant the role.** `roles/datastore.user` *is* the Firestore role:
+the product was formerly Cloud Datastore and the role name never changed.
+It allows reading and writing documents, not administering the database.
+
+```bash
+gcloud projects add-iam-policy-binding $PROJECT_ID --member "serviceAccount:$SA_MIND" --role roles/datastore.user --condition=None --quiet
+```
+
+**Step 4 — turn it on.** `--update-env-vars` adds to the environment rather
+than replacing it, unlike `--set-env-vars`:
+
+```bash
+gcloud run services update opsmind-portal --region $REGION --update-env-vars HISTORY_ENABLED=true
+```
+
+**Step 5 — verify.** The first rollup is written about a minute after boot and
+then every five minutes.
+
+```bash
+curl -s "$OPSMIND_URL/api/v1/meta?token=$DASHBOARD_TOKEN" | python3 -c "import json,sys; h=json.load(sys.stdin)['collectors']['history']; print('enabled  :', h['enabled']); print('connected:', h['connected']); print('error    :', h['clientError'] or 'none'); print('lastWrite:', h['lastWrite'])"
+```
+
+Want `enabled: True`, `connected: True`, `error: none`. After a few minutes
+`lastWrite` should show `ok: True` and a non-zero `minutesWritten`.
+
+```bash
+curl -s "$OPSMIND_URL/api/v1/history/compare?token=$DASHBOARD_TOKEN" | python3 -m json.tool | head -20
+```
+
+**Expect `available: false` with "Historical data is being collected" today.**
+That is correct, not a fault: a comparison needs a full day on both sides, so
+it starts working tomorrow. Nothing is estimated to fill the gap.
+
+### What it costs
+
+| Item | Charge |
+|---|---|
+| Firestore storage | 1 GiB free. A year of daily documents is well under a megabyte |
+| Document reads | 50,000/day free. The dashboard reads 2 per Overview load |
+| Document writes | 20,000/day free. One write per five minutes is 288/day |
+
+Comfortably inside the free tier at this scale.
+
+### If Firestore breaks
+
+Nothing else does. The writer runs on its own thread, every call is wrapped,
+and failures are reported through `/api/v1/meta` rather than raised. Live
+monitoring, alerts, incidents, cost and the AI explanation are all unaffected —
+there is a test for exactly this. To turn it off again:
+
+```bash
+gcloud run services update opsmind-portal --region $REGION --update-env-vars HISTORY_ENABLED=false
+```
+
+---
+
+## Part 11 — Redeploy after an update
 
 For a service that already exists. Nothing here creates anything, and the
 existing environment variables, service account and IAM are all preserved.
@@ -404,7 +486,7 @@ looks stale, that is worth investigating rather than working around.
 
 ---
 
-## Part 11 — Tear down
+## Part 12 — Tear down
 
 > **Not until the hackathon is over.**
 
