@@ -685,7 +685,8 @@ def _asset_version() -> str:
     """
     newest = 0.0
     for name in ("app.js", "styles.css", "index.html",
-                 "landing.html", "landing.css", "landing.js"):
+                 "landing.html", "landing.css", "landing.js",
+                 "how-it-works.html", "about.html"):
         path = os.path.join(_STATIC, name)
         if os.path.exists(path):
             newest = max(newest, os.path.getmtime(path))
@@ -711,6 +712,16 @@ def landing() -> Any:
     JavaScript before anyone has pressed anything."""
     page = _page("landing.html")
     return page if page is not None else dashboard()
+
+
+@app.get("/how-it-works", include_in_schema=False)
+def how_it_works() -> Any:
+    return _page("how-it-works.html") or landing()
+
+
+@app.get("/about", include_in_schema=False)
+def about() -> Any:
+    return _page("about.html") or landing()
 
 
 @app.get("/app", include_in_schema=False)

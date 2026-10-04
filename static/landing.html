@@ -3,180 +3,176 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpsMind</title>
-<meta name="description" content="Cloud log monitoring, resource visibility and cost optimization for Google Cloud. Reads Cloud Logging and Cloud Monitoring directly.">
+<title>OpsMind · Cloud log monitoring</title>
+<meta name="description" content="OpsMind turns cloud logs into incidents with a likely cause and a next step. Google Cloud today, Azure and AWS coming soon.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/landing.css">
 </head>
 <body>
 
-<nav>
+<nav class="nav">
   <div class="wrap nav-in">
-    <a class="logo" href="/"><span class="mark">◈</span>OpsMind</a>
+    <a class="logo" href="/">
+      <span class="logo-mark" aria-hidden="true">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 8.5 4 5l2.2 2.2L11 2" stroke="#6c9cff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      OpsMind
+    </a>
     <div class="nav-links">
       <a href="#product">Product</a>
-      <a href="#solutions">Solutions</a>
-      <a href="#cloud">Google Cloud</a>
-      <a href="#about">About</a>
+      <a href="#clouds">Clouds</a>
+      <a href="/about">About</a>
     </div>
     <div class="nav-cta">
-      <a class="btn ghost" href="#solutions">How it works</a>
-      <a class="btn primary" href="/app#projects">Start</a>
+      <a class="btn btn-ghost" href="/how-it-works">How it works</a>
+      <a class="btn btn-primary" href="/app#projects">Start</a>
     </div>
   </div>
 </nav>
 
-<header class="hero">
-  <div class="wrap">
-    <div class="eyebrow"><span class="dot"></span><span id="liveState">reading Cloud Logging</span></div>
-    <h1>Your logs already know what broke. <em>Nothing joins them up.</em></h1>
-    <p class="sub">
-      OpsMind reads Cloud Logging and Cloud Monitoring directly and turns them into
-      incidents with a named cause, a cost, and the revenue they put at risk —
-      the one question no console answers.
-    </p>
-    <div class="hero-cta">
-      <a class="btn primary lg" href="/app#projects">Start — choose a project</a>
-      <a class="btn ghost lg" href="#solutions">See what it answers</a>
+<header class="hero grid-bg">
+  <div class="wrap hero-in">
+    <div>
+      <div class="eyebrow">Cloud log monitoring</div>
+      <h1>Know what broke, and why, before anyone asks.</h1>
+      <p class="lede">OpsMind reads your cloud logs and metrics, groups failures into incidents, and points to the likely cause and the next step.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary btn-lg" href="/app#projects">Start monitoring</a>
+        <a class="btn btn-ghost btn-lg" href="/how-it-works">How it works</a>
+      </div>
+      <p class="hero-note"><span class="live-dot" aria-hidden="true"></span><span id="liveState">Read-only access. Nothing in your project is changed.</span></p>
     </div>
-    <div class="hero-note" id="heroNote">Read-only. OpsMind cannot change anything in your project.</div>
 
-    <div class="figures reveal">
-      <div class="fig"><div class="n" id="figServices">—</div><div class="l">Services watched</div><div class="s" id="figServicesSub">live from this instance</div></div>
-      <div class="fig"><div class="n" id="figEntries">—</div><div class="l">Log entries processed</div><div class="s">since this instance started</div></div>
-      <div class="fig"><div class="n">3</div><div class="l">Latency tiers, labelled</div><div class="s">seconds · minutes · one day</div></div>
-      <div class="fig"><div class="n" id="figRules">7</div><div class="l">Alert thresholds</div><div class="s">editable in the product</div></div>
+    <!-- Product preview. Illustrative figures, labelled as a sample. -->
+    <div class="preview" aria-label="Product preview">
+      <div class="panel panel-pad">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Error rate · checkout-api</div>
+            <div class="panel-sub">Sample data · last 6 hours</div>
+          </div>
+          <span class="chip">Threshold 5%</span>
+        </div>
+        <svg class="chart" viewBox="0 0 520 170" role="img" aria-label="Error rate spikes above the 5 percent threshold around 14:00">
+          <g stroke="#26262a"><line x1="34" y1="20" x2="510" y2="20"/><line x1="34" y1="80" x2="510" y2="80"/><line x1="34" y1="140" x2="510" y2="140"/></g>
+          <line x1="34" y1="80" x2="510" y2="80" stroke="#f06a6a" stroke-dasharray="4 4" opacity=".55"/>
+          <text x="0" y="24">10%</text><text x="6" y="84">5%</text><text x="10" y="144">0%</text>
+          <path d="M34 128 L90 126 L146 129 L202 124 L258 121 L300 92 L330 46 L360 38 L392 62 L430 108 L470 120 L510 122 L510 140 L34 140 Z" fill="#6c9cff" opacity=".08"/>
+          <path d="M34 128 L90 126 L146 129 L202 124 L258 121 L300 92 L330 46 L360 38 L392 62 L430 108 L470 120 L510 122" fill="none" stroke="#6c9cff" stroke-width="2" stroke-linejoin="round"/>
+          <circle cx="360" cy="38" r="4" fill="#f06a6a"/>
+          <text x="34" y="162">10:00</text><text x="190" y="162">12:00</text><text x="346" y="162">14:00</text><text x="476" y="162">16:00</text>
+        </svg>
+      </div>
+
+      <div class="preview-row">
+        <div class="panel panel-pad">
+          <div class="sev">INCIDENT · CRITICAL</div>
+          <div class="incident-title">5xx rate at 8.4% on checkout-api</div>
+          <div class="cause">Likely cause: <b>payment provider timeouts</b></div>
+          <a class="link" href="/how-it-works">See the evidence →</a>
+        </div>
+        <div class="panel panel-pad">
+          <div class="label">Live logs</div>
+          <ul class="events">
+            <li><span class="lvl-err">payment_timeout</span><span class="t">0.4s</span></li>
+            <li><span class="lvl-warn">retry_scheduled</span><span class="t">1.1s</span></li>
+            <li><span>order_created</span><span class="t">2.3s</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="panel flow">
+        <span>log</span><span class="arrow">→</span><span class="hl">incident</span><span class="arrow">→</span><span>fix</span>
+        <span class="note">From a raw line to a next step</span>
+      </div>
     </div>
   </div>
 </header>
 
-<!-- PRODUCT -->
-<section id="product">
+<section id="clouds" class="providers">
   <div class="wrap">
-    <div class="sec-head reveal">
-      <div class="kicker">Product</div>
-      <h2>An operations console that reaches a conclusion.</h2>
-      <p>Logs, metrics and cost are already in Google Cloud, on three different screens with three
-         different time axes. OpsMind reads all three and does the joining — deterministically, so
-         the same window always produces the same answer.</p>
-    </div>
-    <div class="cards">
-      <div class="card reveal"><div class="ic">◉</div>
-        <h3>Incidents, not alerts</h3>
-        <p>A threshold crossing becomes an incident with a timeline, the conditions that fired, and
-           a suspected root cause identified from which service error logs actually blame.</p></div>
-      <div class="card reveal"><div class="ic">₹</div>
-        <h3>Cost per incident</h3>
-        <p>Measured usage multiplied by Google's published list prices. Labelled modeled, never
-           presented as billed, and shown beside the real billing tier.</p>
-        <code>+$3.42/hr above baseline · 61% log ingestion</code></div>
-      <div class="card reveal"><div class="ic">≡</div>
-        <h3>One request, four services</h3>
-        <p>Trace propagation across every hop, so "which service caused it" has a provable answer
-           rather than a guess.</p></div>
-      <div class="card reveal"><div class="ic">◈</div>
-        <h3>Patterns and anomalies</h3>
-        <p>Every log line clustered by template, and each series compared against its own baseline —
-           because a fixed threshold cannot tell you what is unusual <em>for this service</em>.</p></div>
-      <div class="card reveal"><div class="ic">⚑</div>
-        <h3>A ranked queue, not a wall</h3>
-        <p>What to do now, why it matters, the first step, and how you will know it worked. Priority
-           is not severity: a resolved critical ranks below a firing warning.</p></div>
-      <div class="card reveal"><div class="ic">◐</div>
-        <h3>Grounded explanations</h3>
-        <p>Optional Gemini narration over an evidence bundle. Every number it emits is checked
-           against that evidence, with a deterministic fallback so a demo cannot break.</p></div>
+    <span class="label">Clouds</span>
+    <div class="provider-row">
+      <div class="provider">Google Cloud <span class="badge badge-live">Supported</span></div>
+      <div class="provider soon">Microsoft Azure <span class="badge badge-soon">Coming soon</span></div>
+      <div class="provider soon">AWS <span class="badge badge-soon">Coming soon</span></div>
     </div>
   </div>
 </section>
 
-<!-- SOLUTIONS -->
-<section id="solutions">
+<section id="product" class="section">
   <div class="wrap">
-    <div class="sec-head reveal">
-      <div class="kicker">Solutions</div>
-      <h2>Five questions the console leaves open.</h2>
-      <p>Every number below already exists in Google Cloud. None of them are connected to each other,
-         and that gap is the entire product.</p>
+    <div class="section-head reveal">
+      <div class="eyebrow">One workspace</div>
+      <h2>Logs, incidents and resources in one view</h2>
     </div>
-    <div class="pa reveal">
-      <div><div class="q">Today</div><p>An alert fires on the gateway. The gateway is fine — something two hops away is not.</p></div>
-      <div><div class="a">With OpsMind</div><p><strong>Root cause named</strong> from which service error logs cite as the failing dependency, with the count behind it.</p></div>
-      <div><div class="q">Today</div><p>You can see an error rate. You cannot see what the outage is costing while it runs.</p></div>
-      <div><div class="a">With OpsMind</div><p><strong>Cost per hour above baseline</strong>, broken down by driver, with the arithmetic shown.</p></div>
-      <div><div class="q">Today</div><p>Nothing in the console knows a failed checkout was worth anything.</p></div>
-      <div><div class="a">With OpsMind</div><p><strong>Revenue at risk</strong>, measured from the log stream — technical and business impact side by side.</p></div>
-      <div><div class="q">Today</div><p>Billing data is a day behind, so cost cannot react to an incident.</p></div>
-      <div><div class="a">With OpsMind</div><p><strong>Three labelled tiers</strong> — live, near-real-time and billed — so nobody mistakes the stale number for the fresh one.</p></div>
-      <div><div class="q">Today</div><p>Waste has no alert. Nobody is paged for an over-provisioned service.</p></div>
-      <div><div class="a">With OpsMind</div><p><strong>Savings calculated</strong> from published prices, with a copyable command — or labelled an opportunity when it cannot be calculated honestly.</p></div>
+
+    <div class="workspace reveal">
+      <div class="panel panel-pad">
+        <div class="panel-head">
+          <div class="panel-title">Requests and errors</div>
+          <span class="chip">Last 24 hours</span>
+        </div>
+        <svg class="chart" viewBox="0 0 560 210" role="img" aria-label="Requests rise through the day while errors stay low except for one spike">
+          <g stroke="#26262a"><line x1="38" y1="20" x2="550" y2="20"/><line x1="38" y1="85" x2="550" y2="85"/><line x1="38" y1="150" x2="550" y2="150"/></g>
+          <text x="2" y="24">12k</text><text x="8" y="89">6k</text><text x="20" y="154">0</text>
+          <path d="M38 132 L102 120 L166 108 L230 96 L294 80 L358 70 L422 58 L486 46 L550 34" fill="none" stroke="#6c9cff" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M38 146 L102 145 L166 146 L230 144 L294 112 L358 140 L422 145 L486 144 L550 145" fill="none" stroke="#6b6b73" stroke-width="1.6" stroke-dasharray="4 4" stroke-linejoin="round"/>
+          <text x="38" y="178">00:00</text><text x="166" y="178">06:00</text><text x="294" y="178">12:00</text><text x="422" y="178">18:00</text>
+        </svg>
+        <div class="legend"><span><i></i>Requests</span><span><i class="prev"></i>Errors</span></div>
+      </div>
+
+      <div class="stack">
+        <div class="panel panel-pad stat">
+          <div class="label">Open incidents</div>
+          <div class="stat-row"><span class="stat-value">2</span><span class="delta bad">1 critical</span></div>
+          <div class="stat-foot">Grouped by cause, not by alert</div>
+        </div>
+        <div class="panel panel-pad stat">
+          <div class="label">p95 latency</div>
+          <div class="stat-row"><span class="stat-value">412ms</span><span class="delta good">−38ms</span></div>
+          <div class="stat-foot">Across 6 services</div>
+        </div>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- GOOGLE CLOUD -->
-<section id="cloud">
+<section class="section" style="padding-top:0;border-bottom:0">
   <div class="wrap">
-    <div class="sec-head reveal">
-      <div class="kicker">Built on Google Cloud</div>
-      <h2>Native, read-only, and inexpensive by construction.</h2>
-      <p>OpsMind holds read-only roles and exposes no endpoint that changes anything in your project.
-         Reading Google Cloud system metrics is not chargeable, and querying your own logs is free.</p>
-    </div>
-    <div class="gcp reveal">
-      <div class="svc"><span class="tag">source of truth</span><div class="t">Cloud Logging</div>
-        <div class="d">Structured logs read through the Logging API. No agent, no sidecar.</div></div>
-      <div class="svc"><span class="tag">platform truth</span><div class="t">Cloud Monitoring</div>
-        <div class="d">Cloud Run CPU, memory, instance count and billable time. Non-chargeable to read.</div></div>
-      <div class="svc"><span class="tag">hosting</span><div class="t">Cloud Run</div>
-        <div class="d">Both the portal and the application it watches. Scales to zero.</div></div>
-      <div class="svc"><span class="tag">discovery</span><div class="t">Resource Manager</div>
-        <div class="d">Lists the real projects this installation can see.</div></div>
-      <div class="svc"><span class="tag">pricing</span><div class="t">Cloud Billing Catalog</div>
-        <div class="d">Published list prices, so cost figures have a verifiable source.</div></div>
-      <div class="svc"><span class="tag">optional</span><div class="t">Vertex AI · Gemini</div>
-        <div class="d">Narrates evidence. Never computes it, and never required.</div></div>
+    <div class="panel trust reveal">
+      <div><div class="label">Access</div><h3>Read-only</h3><p>Viewer roles only. Nothing is changed.</p></div>
+      <div><div class="label">Credentials</div><h3>Server-side</h3><p>The browser never holds a cloud key.</p></div>
+      <div><div class="label">Alerts</div><h3>Grouped</h3><p>One incident per cause, not per line.</p></div>
+      <div><div class="label">Cost</div><h3>Visible</h3><p>Spend shown next to the services using it.</p></div>
     </div>
   </div>
 </section>
 
-<!-- ABOUT -->
-<section id="about">
-  <div class="wrap">
-    <div class="sec-head reveal">
-      <div class="kicker">About</div>
-      <h2>Built for Cognizant's Google Cloud hackathon, Use Case 2.</h2>
-      <p>A cloud-based log monitoring and visualization solution with a dashboard that tracks
-         resource usage and suggests cost-saving actions. The application it observes —
-         CogniKart, a storefront on Cloud Run — is deployed separately and exists only to
-         produce honest telemetry.</p>
+<section class="cta">
+  <div class="wrap cta-in">
+    <div>
+      <h2>Connect a project and see it in minutes.</h2>
+      <p>Pick a Google Cloud project. OpsMind starts reading its logs straight away.</p>
     </div>
-    <div class="cards two">
-      <div class="card reveal"><div class="ic">✓</div><h3>What we will not do</h3>
-        <p>No invented savings figure. No cost presented as billed when it is modeled. No claim of
-           machine learning where the code is arithmetic. Where a number cannot be derived honestly,
-           the product says so instead of printing one.</p></div>
-      <div class="card reveal"><div class="ic">⌁</div><h3>How failure is demonstrated</h3>
-        <p>Fault injection lives in the application, not here. A monitoring platform that can break
-           the thing it watches is a harder thing to trust — so OpsMind has no write path at all.</p></div>
-    </div>
-  </div>
-</section>
-
-<section style="padding-top:0">
-  <div class="wrap">
-    <div class="cta reveal">
-      <h2>Pick a project and look.</h2>
-      <p>OpsMind lists the Google Cloud projects this installation can see and tells you, per project,
-         whether it can actually read the logs — and the exact command to grant it if not.</p>
-      <a class="btn primary lg" href="/app#projects">Start</a>
+    <div class="cta-actions">
+      <a class="btn btn-primary btn-lg" href="/app#projects">Start</a>
+      <a class="btn btn-ghost btn-lg" href="/how-it-works">How it works</a>
     </div>
   </div>
 </section>
 
 <footer>
   <div class="wrap foot-in">
-    <span>OpsMind · cloud log monitoring and cost optimization</span>
-    <span id="footMeta">Read-only · Cloud Logging &amp; Cloud Monitoring</span>
+    <span>© OpsMind</span>
+    <div class="foot-links">
+      <a href="/how-it-works">How it works</a>
+      <a href="/about">About</a>
+      <a href="/app">Dashboard</a>
+    </div>
   </div>
 </footer>
 
