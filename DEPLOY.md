@@ -441,7 +441,103 @@ gcloud run services update opsmind-portal --region $REGION --update-env-vars HIS
 
 ---
 
-## Part 11 — Redeploy after an update
+## Part 11 — CI/CD for two branches
+
+`cloudbuild.yaml` is in the repository root. It builds the image, pushes it to
+Artifact Registry and rolls it out — **changing only the image**. It passes no
+`--set-env-vars`, no `--service-account` and no scaling flags, so the running
+service keeps `DASHBOARD_TOKEN`, `AI_ENABLED`, `HISTORY_ENABLED`,
+`WATCHED_SERVICES` and the read-only `sa-opsmind` identity.
+
+### The decision to make first
+
+`main` and `opsmind-staging` must **not** deploy to the same Cloud Run service,
+or a staging push silently overwrites production. `_SERVICE` is a substitution
+precisely so each trigger can point somewhere different:
+
+| Branch | `_SERVICE` | What it is |
+|---|---|---|
+| `main` | `opsmind-portal` | what you demo |
+| `opsmind-staging` | `opsmind-staging` | a safe place to break things |
+
+### Step 1 — let Cloud Build deploy to Cloud Run
+
+Two grants. The first lets Cloud Build update a service; the second lets it
+run that service as `sa-opsmind`, which Cloud Run requires separately.
+
+```bash
+export PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format 'value(projectNumber)') && export CB_SA="$PROJECT_NUMBER@cloudbuild.gserviceaccount.com" && echo $CB_SA
+```
+
+```bash
+gcloud projects add-iam-policy-binding $PROJECT_ID --member "serviceAccount:$CB_SA" --role roles/run.admin --condition=None --quiet > /dev/null && gcloud iam service-accounts add-iam-policy-binding sa-opsmind@$PROJECT_ID.iam.gserviceaccount.com --member "serviceAccount:$CB_SA" --role roles/iam.serviceAccountUser --quiet > /dev/null && echo "Cloud Build can now deploy"
+```
+
+### Step 2 — create the staging service once, by hand
+
+The pipeline's deploy step passes only `--image`. That is right for updating a
+service and wrong for creating one: a service created that way would have no
+service account, no token and no environment. So create it properly once, and
+let CI only ever change its image afterwards.
+
+```bash
+cd ~/opsmind && gcloud run deploy opsmind-staging --source . --region $REGION --service-account $SA_MIND --allow-unauthenticated --memory 512Mi --cpu 1 --concurrency 40 --min-instances 0 --max-instances 1 --set-env-vars "DATA_SOURCE=gcp,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,DASHBOARD_TOKEN=$DASHBOARD_TOKEN,SERVICE_ACCOUNT_EMAIL=$SA_MIND,HISTORY_ENABLED=true,WATCHED_SERVICES=cognikart-gateway;cognikart-catalog;cognikart-orders;cognikart-payments;opsmind-portal"
+```
+
+`--max-instances 1` because staging needs no headroom.
+
+### Step 3 — connect the repository
+
+Console only, once:
+
+1. <https://console.cloud.google.com/cloud-build/triggers> → region
+   **asia-south1** → **Connect repository**
+2. Source **GitHub (Cloud Build GitHub App)**, authenticate, pick
+   `creatingMYworld/OpsMind`, **Connect**
+
+### Step 4 — two triggers
+
+**Create trigger** twice, identical except for the last two fields:
+
+| Field | Production | Staging |
+|---|---|---|
+| Name | `opsmind-main` | `opsmind-staging` |
+| Event | Push to a branch | Push to a branch |
+| Branch (regex) | `^main$` | `^opsmind-staging$` |
+| Configuration | Cloud Build file | Cloud Build file |
+| Location | `/cloudbuild.yaml` | `/cloudbuild.yaml` |
+| Substitution variable | *(none)* | `_SERVICE` = `opsmind-staging` |
+
+The regexes are anchored on purpose. `main` without anchors also matches a
+branch called `maintenance`.
+
+### Step 5 — prove it works
+
+```bash
+gcloud builds triggers list --region $REGION --format="table(name, github.push.branch, substitutions)"
+```
+
+Then push anything to `opsmind-staging` and watch it:
+
+```bash
+gcloud builds list --region $REGION --limit 3 --format="table(id, status, substitutions.BRANCH_NAME, createTime)"
+```
+
+A build takes two to four minutes. `STATUS: SUCCESS` and a new revision on
+`opsmind-staging` means the pipeline is live. Then merge to `main` and watch
+the same thing happen to `opsmind-portal`.
+
+If a build fails with `PERMISSION_DENIED` on the deploy step, Step 1 did not
+take — re-run it and check `$CB_SA` printed a real address.
+
+### What this costs
+
+Cloud Build gives 2,500 free build-minutes a month. A three-minute build per
+push is comfortably inside it.
+
+---
+
+## Part 12 — Redeploy after an update
 
 For a service that already exists. Nothing here creates anything, and the
 existing environment variables, service account and IAM are all preserved.
@@ -506,7 +602,7 @@ looks stale, that is worth investigating rather than working around.
 
 ---
 
-## Part 12 — Tear down
+## Part 13 — Tear down
 
 > **Not until the hackathon is over.**
 
