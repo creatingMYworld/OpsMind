@@ -339,7 +339,72 @@ generating, and reading is free.
 
 ---
 
-## Part 10 — Tear down
+## Part 10 — Redeploy after an update
+
+For a service that already exists. Nothing here creates anything, and the
+existing environment variables, service account and IAM are all preserved.
+
+**Step 1 — restore the shell variables.** Cloud Shell forgets every `export`
+when the session drops, and the commands below then fail with errors that name
+an argument rather than the real cause:
+
+```bash
+export PROJECT_ID=$(gcloud config get-value project) && export REGION=asia-south1 && export SA_MIND="sa-opsmind@${PROJECT_ID}.iam.gserviceaccount.com" && echo "$PROJECT_ID / $REGION / $SA_MIND"
+```
+
+**Step 2 — pull the new code.**
+
+```bash
+cd ~/opsmind && git pull origin main && git log --oneline -1
+```
+
+If `~/opsmind` is not there, clone it as in Part 3.
+
+If `git pull` reports a conflict or refuses because of local changes, you
+edited files in Cloud Shell. The repository is the source of truth, so discard
+them:
+
+```bash
+cd ~/opsmind && git fetch origin && git reset --hard origin/main
+```
+
+**Step 3 — redeploy.** Deliberately no `--set-env-vars`: on an existing
+service that flag *replaces* the whole environment, which would wipe
+`DASHBOARD_TOKEN` and `AI_ENABLED` and lock you out of your own dashboard.
+Omitting it keeps what is already there.
+
+```bash
+cd ~/opsmind && gcloud run deploy opsmind-portal --source . --region $REGION
+```
+
+Takes two to four minutes; it rebuilds the image with Cloud Build.
+
+**Step 4 — verify the new revision is serving.**
+
+```bash
+export OPSMIND_URL=$(gcloud run services describe opsmind-portal --region $REGION --format 'value(status.url)') && export DASHBOARD_TOKEN=$(gcloud run services describe opsmind-portal --region $REGION --format=json | python3 -c "import json,sys; e=json.load(sys.stdin)['spec']['template']['spec']['containers'][0]['env']; print([x['value'] for x in e if x['name']=='DASHBOARD_TOKEN'][0])") && echo "OPEN: $OPSMIND_URL/?token=$DASHBOARD_TOKEN"
+```
+
+```bash
+curl -s "$OPSMIND_URL/api/v1/meta?token=$DASHBOARD_TOKEN" | python3 -c "import json,sys; d=json.load(sys.stdin); c=d['config']; print('source   :', c['dataSource']); print('project  :', c['project']); print('aiEnabled:', c['aiEnabled']); print('views    :', d.get('routes') and 'ok')"
+```
+
+Then confirm the parts that are new in this revision actually respond:
+
+```bash
+for p in /api/v1/cost/summary /api/v1/routes /api/v1/guide/manifest /about /how-it-works; do printf "%-26s %s\n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' "$OPSMIND_URL$p?token=$DASHBOARD_TOKEN")"; done
+```
+
+All five should print `200`.
+
+The dashboard's own assets are fingerprinted and the HTML is served
+`Cache-Control: no-store`, so the browser picks up new JavaScript and CSS on an
+ordinary reload. A hard refresh should not be necessary; if the page still
+looks stale, that is worth investigating rather than working around.
+
+---
+
+## Part 11 — Tear down
 
 > **Not until the hackathon is over.**
 
