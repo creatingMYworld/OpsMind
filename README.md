@@ -22,15 +22,21 @@ authenticates to the API — for no benefit.
 
 ## What it shows
 
-| View | Contents |
+| Page | Contents |
 |---|---|
-| Overview | Health score, traffic and errors, modeled spend, service table, checkout funnel |
-| Live Logs | Streaming log view with filters, and a trace waterfall across services |
-| Errors | Deterministic error grouping; server faults kept distinct from client mistakes |
+| Landing (`/`) | Product page; How it works (`/how-it-works`) and About (`/about`) |
+| Overview | Status strip, things needing attention, key numbers, what is failing, health by service, checkout funnel, modeled spend, failures and slow paths |
+| Incidents | Thresholds crossed, grouped by cause; breaching and resolved, with root cause and impact |
+| Insights | Anomalies against each series' own baseline, and failure patterns |
+| Services | Health per workload |
+| Performance | Latency percentiles, throughput against failures, every route |
+| Logs | Streaming log view with filters, and error groups for the same window |
 | Resources | CPU, memory against provisioned, instance counts |
-| Cost & Optimization | Modeled spend by driver, free-tier position, recommendations with calculated savings |
+| Cost | Modeled spend by driver, free-tier position, recommendations with calculated savings |
 | Alerts | Editable thresholds |
-| Incidents | Timeline, suspected root cause, cloud cost and revenue at risk |
+| Setup | Platform, project selection with access checks, cloud services in use and available |
+
+The UI design history and decisions are in [`docs/UI.md`](docs/UI.md).
 
 ## Three latency tiers, labelled
 
