@@ -51,18 +51,18 @@
       <div class="card">
         <div class="card-head">
           <div>
-            <h3>Traffic &amp; errors</h3>
+            <h3>5xx error rate</h3>
             <div class="hint">checkout-api · sample data · last 6h</div>
           </div>
           <span class="pill err"><span class="dot"></span>5xx above 5%</span>
         </div>
-        <div class="chart-box"><canvas id="chHeroTraffic" aria-label="Requests by status class with p95 latency"></canvas></div>
+        <div class="chart-box"><canvas id="chHeroTraffic" aria-label="5xx error rate crossing the 5 percent threshold around 13:30"></canvas></div>
       </div>
 
       <div class="preview-row">
         <div class="card">
           <span class="pill crit">CRITICAL</span>
-          <div class="inc-title">5xx rate 8.4% on checkout-api</div>
+          <div class="inc-title">5xx rate 9.9% on checkout-api</div>
           <div class="inc-meta">Likely cause: <b>payment provider timeouts</b></div>
           <div class="inc-meta">3 services affected · 14m open</div>
           <a class="more" href="/how-it-works">See the evidence →</a>

@@ -55,20 +55,27 @@ function charts() {
   if (typeof Chart === "undefined") return;   // CDN blocked: cards still render
   const hero = document.getElementById("chHeroTraffic");
   if (hero) {
+    // Error rate with the alert threshold: one line, one question. The line
+    // turns red only where it crosses the threshold, so the incident is the
+    // first thing the eye lands on.
+    const rate = c5xx.map((v, i) => +(v / (ok5[i] + c4xx[i] + v) * 100).toFixed(1));
+    const THRESHOLD = 5;
     const o = chartDefaults();
-    o.scales = {
-      x: { stacked: true, grid: { color: C.borderSoft }, ticks: { color: C.faint, font: { size: 10 }, autoSkipPadding: 18 } },
-      y: { stacked: true, grid: { color: C.borderSoft }, ticks: { color: C.faint, font: { size: 10 } }, beginAtZero: true },
-      y1: { position: "right", grid: { display: false }, ticks: { color: C.accent, font: { size: 10 } }, beginAtZero: true }
-    };
-    new Chart(hero.getContext("2d"), { type: "bar", options: o, data: {
+    o.plugins.legend = { display: false };
+    o.scales.y.max = 12;
+    o.scales.y.ticks.callback = (v) => v + "%";
+    o.scales.y.ticks.stepSize = 4;
+    const ctx = hero.getContext("2d");
+    const grad = ctx.createLinearGradient(0, 0, 0, hero.parentElement.clientHeight);
+    grad.addColorStop(0, C.accent + "40");
+    grad.addColorStop(1, C.accent + "00");
+    new Chart(ctx, { type: "line", options: o, data: {
       labels: hours,
       datasets: [
-        { label: "2xx/3xx", data: ok5, backgroundColor: C.ok + "cc", stack: "s", borderRadius: 2 },
-        { label: "4xx client", data: c4xx, backgroundColor: C.warn + "cc", stack: "s", borderRadius: 2 },
-        { label: "5xx server", data: c5xx, backgroundColor: C.err + "dd", stack: "s", borderRadius: 2 },
-        { label: "p95 latency (ms)", data: p95, type: "line", yAxisID: "y1",
-          borderColor: C.accent, borderWidth: 2, pointRadius: 0, tension: .3, fill: false }
+        { ...ds("5xx error rate", rate, C.accent, true), backgroundColor: grad,
+          segment: { borderColor: (c) => (c.p0.parsed.y > THRESHOLD || c.p1.parsed.y > THRESHOLD) ? C.err : C.accent } },
+        { label: "Threshold", data: hours.map(() => THRESHOLD), borderColor: C.err + "99",
+          borderDash: [4, 4], borderWidth: 1, pointRadius: 0, fill: false }
       ]
     }});
   }
