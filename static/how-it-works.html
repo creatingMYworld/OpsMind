@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How it works · OpsMind</title>
+<meta name="description" content="Four steps from connecting a cloud project to fixing the incident.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/landing.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="/">
+      <span class="logo-mark" aria-hidden="true">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 8.5 4 5l2.2 2.2L11 2" stroke="#6c9cff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      OpsMind
+    </a>
+    <div class="nav-links">
+      <a href="/#product">Product</a>
+      <a href="/#clouds">Clouds</a>
+      <a href="/about">About</a>
+    </div>
+    <div class="nav-cta">
+      <a class="btn btn-ghost" href="/how-it-works" aria-current="page">How it works</a>
+      <a class="btn btn-primary" href="/app#setup">Start</a>
+    </div>
+  </div>
+</nav>
+
+<header class="page-head grid-bg">
+  <div class="wrap">
+    <div class="eyebrow">How it works</div>
+    <h1>Four steps from log to fix</h1>
+    <p class="lede">Connect a project once. OpsMind does the reading, grouping and ranking from there.</p>
+  </div>
+</header>
+
+<section class="section">
+  <div class="wrap">
+    <div class="steps">
+      <span class="step-line" aria-hidden="true"></span>
+      <div class="step reveal">
+        <div class="step-num">1</div>
+        <h3>Connect a project</h3>
+        <p>Choose a Google Cloud project and grant read-only viewer access.</p>
+        <div class="panel">roles/logging.viewer</div>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">2</div>
+        <h3>Logs flow in</h3>
+        <p>Cloud Logging and Cloud Monitoring are read continuously. No agent to install.</p>
+        <div class="panel">12,480 entries · last 5m</div>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">3</div>
+        <h3>Incidents form</h3>
+        <p>Related failures are grouped into one incident with a likely cause.</p>
+        <div class="panel"><span style="color:var(--bad)">●</span> 5xx on checkout-api</div>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">4</div>
+        <h3>Act on it</h3>
+        <p>Each incident comes with the next step and the signal that confirms it is fixed.</p>
+        <div class="panel"><span style="color:var(--good)">✓</span> Resolved · 5xx &lt; 1%</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Product video</div>
+      <h2>See it in two minutes</h2>
+    </div>
+    <!-- VIDEO SLOT
+         Replace the placeholder <div> below with either:
+           <video src="/static/opsmind-demo.mp4" controls preload="metadata" poster="/static/opsmind-demo.jpg"></video>
+         or a YouTube embed:
+           <iframe src="https://www.youtube-nocookie.com/embed/VIDEO_ID" title="OpsMind product video" allowfullscreen></iframe>
+         The container keeps a 16:9 frame either way. -->
+    <div class="panel video reveal" id="product-video">
+      <div>
+        <div class="play" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 18 18"><path d="M5 3.5v11l9-5.5z" fill="#f4f4f5"/></svg>
+        </div>
+        <div class="label">Product video coming soon</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap cta-in">
+    <div>
+      <h2>Ready to connect a project?</h2>
+      <p>Read-only from the first click.</p>
+    </div>
+    <div class="cta-actions">
+      <a class="btn btn-primary btn-lg" href="/app#setup">Start</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-in">
+    <span>© OpsMind</span>
+    <div class="foot-links">
+      <a href="/how-it-works">How it works</a>
+      <a href="/about">About</a>
+      <a href="/app">Dashboard</a>
+    </div>
+  </div>
+</footer>
+
+<script src="/static/landing.js"></script>
+</body>
+</html>

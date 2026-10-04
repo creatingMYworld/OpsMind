@@ -380,3 +380,89 @@ def _trim(evidence: Dict[str, Any]) -> Dict[str, Any]:
 def cache_stats() -> Dict[str, Any]:
     with _cache_lock:
         return {"cachedExplanations": len(_cache), "keys": list(_cache.keys())}
+
+
+# --- cost summary ---------------------------------------------------------
+
+COST_SYSTEM = """You are a FinOps assistant inside a cloud monitoring \
+platform. You will receive a JSON bundle of modeled cloud spend and the \
+optimization recommendations derived from it.
+
+Hard rules:
+- Use ONLY numbers present in the bundle. Never invent or extrapolate a figure.
+- Three short sentences of plain prose. No headings, no bullet points, no
+  markdown.
+- Say where the money is going, which single action saves the most, and what
+  to do first."""
+
+_cost_cache: Dict[str, Dict[str, Any]] = {}
+COST_CACHE_S = 120
+
+
+def summarize_cost(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """A short written summary of the cost picture.
+
+    Gemini when it is enabled and reachable, otherwise a deterministic
+    sentence built from the same numbers. `ai` tells the UI which it got, so
+    only genuinely generated text carries the AI tag.
+    """
+    key = json.dumps(ctx, sort_keys=True, default=str)
+    hit = _cost_cache.get(key)
+    if hit and time.time() - hit["at"] < COST_CACHE_S:
+        return dict(hit["value"], cached=True)
+
+    deterministic = _deterministic_cost_summary(ctx)
+    client, err = _get_client()
+    out: Dict[str, Any] = {
+        "ai": False, "provider": "deterministic", "model": None,
+        "summary": deterministic, "reason": err or "AI disabled",
+    }
+    if client is not None:
+        try:
+            from google.genai import types as gt
+            resp = client.models.generate_content(
+                model=settings.ai_model,
+                contents="```json\n%s\n```" % json.dumps(ctx, indent=1, default=str),
+                config=gt.GenerateContentConfig(
+                    system_instruction=COST_SYSTEM,
+                    temperature=0.2,
+                    max_output_tokens=300,
+                ),
+            )
+            text = (getattr(resp, "text", None) or "").strip()
+            if text:
+                out = {"ai": True, "provider": "vertex-ai",
+                       "model": settings.ai_model, "summary": text,
+                       "reason": None, "deterministicAlternative": deterministic}
+        except Exception as exc:  # noqa: BLE001 - never let AI break the page
+            out["reason"] = "%s: %s" % (type(exc).__name__, exc)
+
+    out["cached"] = False
+    _cost_cache[key] = {"at": time.time(), "value": out}
+    return out
+
+
+def _deterministic_cost_summary(ctx: Dict[str, Any]) -> str:
+    cost = ctx.get("cost") or {}
+    drivers = {k: (v or 0.0) for k, v in (cost.get("byDriver") or {}).items()}
+    recs = ctx.get("recommendations") or []
+    priced = [r for r in recs if r.get("estimatedSavingUsdPerMonth")]
+    parts = ["Modeled spend is $%s/hour, about $%s a month at this rate."
+             % (_n(cost.get("usdPerHour")), _n(cost.get("projectedUsdPerMonth")))]
+    if drivers:
+        top, val = max(drivers.items(), key=lambda kv: kv[1])
+        total = sum(drivers.values()) or 1.0
+        label = {"cpu": "CPU", "memory": "Memory", "requests": "Requests",
+                 "logging": "Log ingestion"}.get(top, top)
+        parts.append("%s is the largest driver at %.0f%% of the rate."
+                     % (label, 100.0 * val / total))
+    if priced:
+        best = max(priced, key=lambda r: r["estimatedSavingUsdPerMonth"])
+        parts.append("The largest calculated saving is $%s a month from \"%s\"."
+                     % (_n(best["estimatedSavingUsdPerMonth"]), best.get("title", "")))
+    elif recs:
+        parts.append("%d recommendation(s) are open; none has a saving that can "
+                     "be calculated from published prices yet." % len(recs))
+    else:
+        parts.append("No recommendation is open for this window.")
+    return " ".join(parts)

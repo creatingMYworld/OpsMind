@@ -294,6 +294,8 @@ def logs(
     service: Optional[str] = None,
     q: Optional[str] = None,
     event: Optional[str] = None,
+    status: Optional[int] = Query(None, ge=1, le=5),
+    route: Optional[str] = None,
     errorCode: Optional[str] = None,
     trace: Optional[str] = None,
     sinceS: Optional[int] = Query(None, ge=1, le=86400),
@@ -302,7 +304,8 @@ def logs(
     services = [s for s in (service or "").split(",") if s.strip()] or None
     result = store.logs(
         limit=limit, offset=offset, min_severity=severity, services=services,
-        q=q, event=event, error_code=errorCode, trace=trace,
+        q=q, event=event, status_class=status, route=route,
+        error_code=errorCode, trace=trace,
         since=(time.time() - sinceS) if sinceS else None,
         include_heartbeats=includeHeartbeats,
     )
@@ -317,6 +320,9 @@ async def logs_stream(
     severity: Optional[str] = None,
     service: Optional[str] = None,
     q: Optional[str] = None,
+    event: Optional[str] = None,
+    status: Optional[int] = Query(None, ge=1, le=5),
+    route: Optional[str] = None,
 ) -> StreamingResponse:
     """Server-Sent Events: new log lines pushed as they arrive.
 
@@ -334,7 +340,8 @@ async def logs_stream(
             if await request.is_disconnected():
                 break
             batch = store.logs(limit=80, min_severity=severity,
-                               services=services, q=q, since=cursor)
+                               services=services, q=q, event=event,
+                               status_class=status, route=route, since=cursor)
             entries = list(reversed(batch["entries"]))  # oldest first
             if entries:
                 cursor = max(e["ts"] for e in entries) + 1e-6
@@ -390,6 +397,16 @@ def errors(window: int = Query(60, ge=1, le=180),
         "groupingKey": "service + errorCode + errorClass + route + "
                        "normalized message (deterministic, no ML)",
     }
+
+
+@app.get("/api/v1/routes")
+def routes(window: int = Query(60, ge=1, le=180),
+           slow_ms: int = Query(500, ge=50, le=10000),
+           limit: int = Query(10, ge=1, le=200)) -> Dict[str, Any]:
+    """Slowest endpoints and the slow-request count, from individual requests."""
+    data = store.route_stats(window_minutes=window, slow_ms=slow_ms, limit=limit)
+    data["windowMinutes"] = window
+    return data
 
 
 @app.get("/api/v1/services")
@@ -546,6 +563,13 @@ def projects(refresh: bool = False) -> Dict[str, Any]:
 def project_access(project_id: str, force: bool = False) -> Dict[str, Any]:
     """Probe whether this project's logs are readable: one tiny Cloud Logging
     call, which is more conclusive than inferring it from an IAM policy."""
+    # Local mode has one pseudo-project fed by direct ingest. It is not a
+    # Google Cloud project, so probing Cloud Logging for it can only fail and
+    # would tell the user to grant IAM on a project that does not exist.
+    if settings.data_source != "gcp" and project_id == "local":
+        return {"projectId": "local", "at": time.time(), "connected": True,
+                "hasRecentLogs": store.stats().get("bufferedEntries", 0) > 0,
+                "reason": "Receiving logs by direct ingest.", "howToFix": None}
     from .collectors.gcp_projects import directory
     return directory.check_access(project_id, force=force)
 
@@ -581,6 +605,29 @@ def select_project(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         "note": "The working set was cleared and the collectors re-pointed. "
                 "Charts refill from Cloud Logging within a poll or two.",
     }
+
+
+# --- product guide --------------------------------------------------------
+@app.post("/api/v1/guide")
+def guide(payload: Dict[str, Any] = Body(default_factory=dict)) -> Dict[str, Any]:
+    """Answer a question about OpsMind itself.
+
+    Grounded in a manifest generated from the running application, so it cannot
+    describe a view that does not exist or report a configuration that is no
+    longer true. Answers deterministically when no model is configured.
+    """
+    from .ai import guide as guide_engine
+    return guide_engine.ask(payload.get("question", ""), store=store)
+
+
+@app.get("/api/v1/guide/manifest")
+def guide_manifest() -> Dict[str, Any]:
+    """What the guide is allowed to know. Exposed so its grounding is
+    inspectable rather than taken on trust."""
+    from .ai import guide as guide_engine
+    data = guide_engine.manifest(store)
+    data["suggestions"] = guide_engine.suggestions()
+    return data
 
 
 @app.get("/api/v1/notifications")
@@ -654,6 +701,32 @@ def cost_billed() -> Dict[str, Any]:
     return cost_engine.billed_status()
 
 
+@app.get("/api/v1/cost/summary")
+def cost_summary(window: int = Query(30, ge=1, le=180)) -> Dict[str, Any]:
+    """A written summary of the cost picture, for the Optimization Center.
+
+    Gemini writes it when AI is enabled; otherwise the same numbers are
+    summarised deterministically and the response says `ai: false`, so the UI
+    only tags text a model actually wrote.
+    """
+    from .ai import explain as explainer
+
+    c = cost_engine.rate(store, window_minutes=window)
+    recs = recommend_engine.generate(store, window_minutes=max(window, 15))
+    ctx = {
+        "cost": {k: c.get(k) for k in ("usdPerHour", "projectedUsdPerDay",
+                                       "projectedUsdPerMonth", "byDriver")},
+        "byService": [{"service": s["service"],
+                       "usdPerHour": s["usdPerHour"]["total"]}
+                      for s in c.get("byService", [])],
+        "recommendations": [{k: r.get(k) for k in
+                             ("title", "severity", "recommendation",
+                              "estimatedSavingUsdPerMonth", "observedMetric",
+                              "observedValue", "unit")} for r in recs],
+    }
+    return explainer.summarize_cost(ctx)
+
+
 @app.get("/api/v1/recommendations")
 def recommendations(window: int = Query(30, ge=1, le=180)) -> Dict[str, Any]:
     recs = recommend_engine.generate(store, window_minutes=window)
@@ -685,7 +758,8 @@ def _asset_version() -> str:
     """
     newest = 0.0
     for name in ("app.js", "styles.css", "index.html",
-                 "landing.html", "landing.css", "landing.js"):
+                 "landing.html", "landing.css", "landing.js",
+                 "how-it-works.html", "about.html"):
         path = os.path.join(_STATIC, name)
         if os.path.exists(path):
             newest = max(newest, os.path.getmtime(path))
@@ -711,6 +785,16 @@ def landing() -> Any:
     JavaScript before anyone has pressed anything."""
     page = _page("landing.html")
     return page if page is not None else dashboard()
+
+
+@app.get("/how-it-works", include_in_schema=False)
+def how_it_works() -> Any:
+    return _page("how-it-works.html") or landing()
+
+
+@app.get("/about", include_in_schema=False)
+def about() -> Any:
+    return _page("about.html") or landing()
 
 
 @app.get("/app", include_in_schema=False)

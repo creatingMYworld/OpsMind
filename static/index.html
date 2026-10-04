@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpsMind</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/styles.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -12,21 +15,28 @@
 
   <aside class="rail">
     <div class="brand">
-      <h1><a href="/" style="color:inherit;text-decoration:none">OpsMind</a></h1>
-      <div class="sub">project <strong id="railProject">—</strong></div>
+      <a class="brand-link" href="/">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/></svg>
+        </span>
+        <span>
+          <span class="brand-name">OpsMind</span>
+          <span class="brand-sub">Cloud log monitoring</span>
+        </span>
+      </a>
+      <div class="brand-project">project <strong id="railProject">—</strong></div>
     </div>
     <nav class="nav" id="nav">
-      <button data-view="projects"><span class="ico">▣</span> Projects</button>
-      <button data-view="overview" class="active"><span class="ico">◉</span> Overview</button>
-      <button data-view="incidents"><span class="ico">✸</span> Incidents <span class="badge" id="incBadge" style="display:none">0</span></button>
-      <button data-view="insights"><span class="ico">◈</span> Insights</button>
-      <button data-view="services"><span class="ico">▦</span> Services</button>
-      <button data-view="logs"><span class="ico">≡</span> Live Logs</button>
-      <button data-view="errors"><span class="ico">⚠</span> Errors</button>
-      <button data-view="resources"><span class="ico">▤</span> Resources</button>
-      <button data-view="cost"><span class="ico">₹</span> Cost &amp; Optimization</button>
-      <button data-view="alerts"><span class="ico">⏱</span> Alerts</button>
-      <button data-view="setup"><span class="ico">⚙</span> Setup</button>
+      <button data-view="overview" data-nicon="grid" class="active">Overview</button>
+      <button data-view="incidents" data-nicon="alert">Incidents <span class="badge" id="incBadge" style="display:none">0</span></button>
+      <button data-view="insights" data-nicon="sparkles">Insights <span class="badge" id="insBadge" style="display:none">0</span></button>
+      <button data-view="services" data-nicon="layers">Services</button>
+      <button data-view="performance" data-nicon="gauge">Performance</button>
+      <button data-view="logs" data-nicon="scroll">Logs</button>
+      <button data-view="resources" data-nicon="cpu">Resources</button>
+      <button data-view="cost" data-nicon="banknote">Cost</button>
+      <button data-view="alerts" data-nicon="bell">Alerts</button>
+      <button data-view="setup" data-nicon="settings">Setup</button>
     </nav>
     <div class="rail-foot">
       <div id="srcBadge" class="pill muted" style="margin-bottom:6px"><span class="dot"></span> connecting…</div>
@@ -36,99 +46,130 @@
 
   <main class="main">
     <header class="topbar">
-      <span id="healthPill" class="pill muted"><span class="dot"></span> —</span>
-      <span class="faint" style="font-size:12px">window</span>
-      <select id="windowSel" title="Refresh cadence follows the window: a 1-minute view is useless unless it moves, and a 3-hour view re-polling every 5s is waste">
-        <option value="1">1 min</option>
-        <option value="5">5 min</option>
-        <option value="15" selected>15 min</option>
-        <option value="60">1 hour</option>
-        <option value="180">3 hours</option>
-      </select>
+      <div class="tb-title">
+        <div class="tb-name" id="pageTitle">Overview</div>
+        <div class="tb-sub" id="pageSub"></div>
+      </div>
       <span class="spacer"></span>
-      <span class="live-dot" id="liveDot" title="Polling cadence follows the selected window"><span class="dot"></span><span id="liveLabel">live</span></span>
-      <button class="btn" id="refreshBtn" title="Refresh now">⟳ Refresh</button>
-      <button class="btn bell" id="bellBtn" title="Recent incident transitions">
-        <span>◔</span><span class="bell-badge" id="bellBadge" hidden>0</span>
-      </button>
-      <button class="btn" id="themeBtn" title="Toggle theme">◐</button>
+      <span id="healthPill" hidden></span>
+      <label class="tb-btn tb-project" title="Project to monitor">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 1 0-1.3-8.8A6 6 0 1 0 6 18h11.5"/></svg>
+        <select id="projectSel" aria-label="Project"><option>loading…</option></select>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </label>
+      <label class="tb-btn tb-window" title="Time window">
+        <span class="faint">Last</span>
+        <select id="windowSel" aria-label="Time window">
+          <option value="1">1 minute</option>
+          <option value="5">5 minutes</option>
+          <option value="15" selected>15 minutes</option>
+          <option value="60">1 hour</option>
+          <option value="180">3 hours</option>
+        </select>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </label>
+      <span class="tb-btn tb-live" id="liveDot" title="Polling cadence follows the selected window"><span class="dot"></span><span id="liveLabel">Live</span></span>
+      <button class="tb-btn" id="refreshBtn" title="Refresh now"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg><span>Refresh</span></button>
+      <button class="tb-btn tb-icon bell" id="bellBtn" title="Notifications"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></svg><span class="bell-badge" id="bellBadge" hidden>0</span></button>
+      <button class="tb-btn tb-icon" id="themeBtn" title="Toggle theme"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
     </header>
 
     <!-- OVERVIEW -->
     <section class="view active" id="view-overview">
       <h2>Overview</h2>
-      <div class="lede">System health, traffic, business outcome and modeled cloud spend for CogniKart.</div>
+      <div class="lede">Health, errors and open incidents at a glance.</div>
+
+      <div id="statusStrip" class="strip"></div>
 
       <div class="card" id="actionCard" style="margin-bottom:14px">
-        <h3>What to do now <span id="actionCount" class="pill muted"></span></h3>
-        <div class="hint" id="actionHint">Ranked by urgency, not severity — a resolved CRITICAL sits below a firing MEDIUM, because only one of them needs someone now.</div>
+        <h3 data-icon="bolt" data-tint="warn"><span id="actionTitle">Things needing attention</span> <span id="actionCount" class="pill muted"></span></h3>
+        <div class="hint" id="actionHint" hidden></div>
         <div id="actionQueue"></div>
       </div>
 
+      <div class="eyebrow-label">Key numbers</div>
       <div class="grid g4" id="heroTiles"></div>
+
+      <div class="sec-head">
+        <div><div class="eyebrow-label">Reliability</div><h2 class="sec-title">What is failing</h2></div>
+        <span id="failChip"></span>
+      </div>
+      <div class="grid g4" id="failTiles"></div>
+      <div class="grid split-21" style="margin-top:14px">
+        <div class="card chart-card">
+          <div class="card-row">
+            <h3>Volume over time, by severity</h3>
+            <div class="legend-inline" id="sevLegend"></div>
+          </div>
+          <div class="chart-wrap"><canvas id="chSeverity"></canvas></div>
+        </div>
+        <div class="card"><h3>Severity split</h3><div id="sevSplit"></div></div>
+      </div>
+
+      <div class="sec-head">
+        <div><div class="eyebrow-label">Breakdown</div><h2 class="sec-title">Health by service</h2></div>
+        <span class="sec-right"><span id="svcChip"></span><a class="sec-link" href="#services">All services →</a></span>
+      </div>
+      <div class="card flush"><div style="overflow-x:auto"><table id="svcTable" class="svc-table"></table></div></div>
+
       <div class="grid g2" style="margin-top:14px">
         <div class="card">
-          <h3>Traffic &amp; errors <span class="tier live">live</span></h3>
-          <div class="hint">Requests by outcome per minute, with p95 latency overlaid.</div>
-          <div class="chart-wrap"><canvas id="chTraffic"></canvas></div>
+          <h3 data-icon="funnel" data-tint="accent">Checkout funnel</h3>
+          <div class="hint">Derived from the log stream: the business view of the same data.</div>
+          <div id="funnelBox"></div>
         </div>
         <div class="card">
-          <h3>Modeled cloud spend <span class="tier live">live · modeled</span></h3>
+          <h3 data-icon="coins" data-tint="money">Modeled cloud spend <span class="tier live">live · modeled</span></h3>
           <div class="hint">Measured usage × Google Cloud published list prices. Not a billed amount.</div>
           <div class="chart-wrap"><canvas id="chCost"></canvas></div>
         </div>
       </div>
-      <div class="grid g2" style="margin-top:14px">
-        <div class="card">
-          <h3>Service health</h3>
-          <div class="hint">Click a service to inspect its resources.</div>
-          <div style="overflow-x:auto"><table id="svcTable"></table></div>
-        </div>
-        <div class="card">
-          <h3>Checkout funnel</h3>
-          <div class="hint">Derived from the log stream — the business view of the same data.</div>
-          <div id="funnelBox"></div>
-        </div>
+
+      <div class="sec-head">
+        <div><div class="eyebrow-label">Detail</div><h2 class="sec-title">Failures and slow paths</h2></div>
       </div>
-      <div class="grid g2" style="margin-top:14px">
-        <div class="card"><h3>Active incidents</h3><div id="ovIncidents"></div></div>
-        <div class="card"><h3>Top cost-saving actions</h3><div id="ovRecs"></div></div>
+      <div class="grid g2">
+        <div class="card"><h3>Most frequent failures</h3><div id="topFailures" class="ranked"></div></div>
+        <div class="card"><h3>Slowest endpoints</h3><div id="slowRoutes" class="ranked"></div></div>
       </div>
+
+      <a class="card recs-summary" href="#cost" style="margin-top:14px">
+        <h3 data-icon="tag" data-tint="cost">Top cost-saving actions</h3>
+        <div id="ovRecs" class="recs-text"></div>
+      </a>
     </section>
 
     <!-- LOGS -->
     <section class="view" id="view-logs">
-      <h2>Live Logs <span class="tier live">live · 1–5 s</span></h2>
-      <div class="lede">Centralised, structured logs from all four CogniKart services. Click any row for the full entry and its trace across services.</div>
-      <div class="logbar">
-        <select id="logSev"><option value="">all severities</option><option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select>
-        <select id="logSvc"><option value="">all services</option></select>
-        <input type="text" id="logQ" placeholder="search message, event, error code…" style="min-width:260px">
-        <button class="btn" id="logPause">⏸ Pause</button>
-        <button class="btn" id="logClear">Clear</button>
-        <span class="faint mono" id="logCount" style="margin-left:auto"></span>
+      <h2>Logs</h2>
+      <div class="lede">Search and filter every log entry.</div>
+      <div class="card filterbar">
+        <input type="text" id="logQ" class="fsearch" placeholder="Search logs   /">
+        <label class="fsel"><span class="fsel-k">Severity</span><select id="logSev"><option value="">All</option><option value="INFO">INFO +</option><option value="WARNING">WARNING +</option><option value="ERROR">ERROR +</option><option value="CRITICAL">CRITICAL</option></select><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+        <label class="fsel"><span class="fsel-k">Service</span><select id="logSvc"><option value="">All</option></select><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+        <label class="fsel"><span class="fsel-k">Status</span><select id="logStatus"><option value="">All</option><option value="2">2xx</option><option value="4">4xx</option><option value="5">5xx</option></select><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+        <label class="fsel"><span class="fsel-k">Route</span><select id="logRoute"><option value="">All</option></select><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+        <label class="fsel"><span class="fsel-k">Event</span><select id="logEvent"><option value="">All</option></select><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+        <span class="fend"><span class="fcount" id="logCount"></span>
+        <button class="tb-btn tb-icon" id="logPause" title="Pause live stream" aria-label="Pause live stream"></button></span>
       </div>
-      <div class="card" style="padding:10px 12px;margin-bottom:12px">
-        <div class="hint" style="margin:0 0 6px">Log ingestion volume (MiB/min) — the fastest-moving cost driver in this architecture</div>
-        <div class="chart-wrap xs"><canvas id="chLogVol"></canvas></div>
+      <div class="card chart-card" style="margin-top:12px">
+        <div class="card-row"><h3>Matching volume</h3><div class="legend-inline" id="logVolLegend"></div></div>
+        <div class="chart-wrap sm"><canvas id="chLogVol"></canvas></div>
       </div>
-      <div class="logtable"><table><tbody id="logBody"></tbody></table></div>
+      <div id="errBlock" hidden>
+        <div class="sec-head"><div><div class="eyebrow-label">Errors</div><h2 class="sec-title" id="errors">Error details</h2></div><span id="errChip"></span></div>
+        <div class="grid g4" id="errTiles"></div>
+        <div class="card flush" style="margin-top:12px"><div style="overflow-x:auto"><table class="pat-table" id="errTable"></table></div></div>
+        <div class="sec-head"><div><div class="eyebrow-label">Errors</div><h2 class="sec-title">Matching error logs</h2></div></div>
+      </div>
+      <div class="card flush logcard" style="margin-top:12px"><div style="overflow-x:auto"><table class="pat-table logtable2">
+        <thead><tr><th>Time</th><th>Severity</th><th>Event</th><th>Service</th><th>Route</th><th class="right">Status</th><th class="right">Latency</th></tr></thead>
+        <tbody id="logBody"></tbody></table></div></div>
     </section>
 
     <!-- ERRORS -->
-    <section class="view" id="view-errors">
-      <h2>Error Intelligence</h2>
-      <div class="lede">Deterministic grouping by service + error code + exception class + route + normalised message. No ML, no guessing — identical inputs always produce identical groups.</div>
-      <div class="grid g3" id="errTiles"></div>
-      <div class="grid g2" style="margin-top:14px">
-        <div class="card"><h3>Errors over time</h3><div class="hint">5xx are server faults; 4xx are client mistakes. The platform never conflates them.</div><div class="chart-wrap"><canvas id="chErrors"></canvas></div></div>
-        <div class="card"><h3>Server vs client</h3><div class="hint">A bad product id is not a service failure.</div><div class="chart-wrap"><canvas id="chErrSplit"></canvas></div></div>
-      </div>
-      <div class="card" style="margin-top:14px">
-        <h3>Error groups</h3><div class="hint">Click a group to see samples and jump to its logs.</div>
-        <div style="overflow-x:auto"><table id="errTable"></table></div>
-      </div>
-    </section>
+
 
     <!-- RESOURCES -->
     <section class="view" id="view-resources">
@@ -138,9 +179,12 @@
         <span class="tier near">near real time</span> comes from Cloud Monitoring and lags by minutes. Both are real measurements.
       </div>
       <div class="grid g4" id="resCards"></div>
-      <div class="grid g2" style="margin-top:14px">
-        <div class="card"><h3>CPU per service <span class="tier live">live</span></h3><div class="hint">Process CPU from heartbeats.</div><div class="chart-wrap"><canvas id="chCpu"></canvas></div></div>
-        <div class="card"><h3>Memory vs provisioned <span class="tier live">live</span></h3><div class="hint">Resident memory against the container limit — the basis for right-sizing.</div><div class="chart-wrap"><canvas id="chMem"></canvas></div></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Heartbeats</div><h2 class="sec-title">Over time</h2></div><span class="tier live">live</span></div>
+      <div class="grid g2 res-charts">
+        <div class="card chart-card"><h3>CPU utilisation</h3><div class="hint">Process CPU per service, percent of one vCPU.</div><div class="chart-wrap"><canvas id="chCpu"></canvas></div></div>
+        <div class="card chart-card"><h3>Memory</h3><div class="hint">Resident memory per service, MiB — the basis for right-sizing.</div><div class="chart-wrap"><canvas id="chMem"></canvas></div></div>
+        <div class="card chart-card"><h3>In-flight requests</h3><div class="hint">Concurrent requests per service, the Cloud Run scaling signal.</div><div class="chart-wrap"><canvas id="chInflight"></canvas></div></div>
+        <div class="card chart-card"><h3>Instance count</h3><div class="hint">Instances reporting per service, from heartbeat identities.</div><div class="chart-wrap"><canvas id="chInst"></canvas></div></div>
       </div>
       <div class="card" style="margin-top:14px">
         <h3>Cloud Monitoring <span class="tier near">near real time</span></h3>
@@ -170,96 +214,99 @@
           <div id="billed"></div>
         </div>
       </div>
-      <div class="card" style="margin-top:14px">
-        <h3>Optimization Center</h3>
-        <div class="hint" id="recHint">Every recommendation carries evidence, the observed metric, a confidence level and a concrete next action. A saving figure appears only when it can be calculated from published pricing.</div>
-        <div id="recs"></div>
-      </div>
+      <div class="sec-head"><div><div class="eyebrow-label">Optimization Center</div><h2 class="sec-title">What to change</h2></div><span id="optChip"></span></div>
+      <div class="grid g3" id="optTiles"></div>
+      <div class="card opt-summary" id="optSummary"></div>
+      <div class="grid g2 opt-recs" id="recs"></div>
+      <div class="faint opt-note" id="recHint"></div>
     </section>
 
     <!-- ALERTS -->
     <section class="view" id="view-alerts">
       <h2>Alert Thresholds</h2>
       <div class="lede">Editable thresholds — this is the brief's "set alert thresholds" step, implemented inside the product. Changes take effect on the next evaluation.</div>
-      <div class="card" id="alertSources" style="margin-bottom:14px"></div>
-      <div id="alertList"></div>
+      <div class="grid g4" id="alertTiles"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Delivery</div><h2 class="sec-title">Where alerts come from</h2></div></div>
+      <div class="grid g2" id="alertSources"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Rules</div><h2 class="sec-title">Thresholds</h2></div><span id="alertChip"></span></div>
+      <div id="alertList" class="rule-list"></div>
     </section>
 
     <!-- PROJECTS -->
-    <section class="view" id="view-projects">
-      <h2>Choose a project</h2>
-      <div class="lede" id="projLede">Google Cloud projects this installation can see. Listing a project and being able to read its logs are different permissions — each card says which it has.</div>
-      <div id="projError"></div>
-      <div class="grid g3" id="projGrid"></div>
-      <div class="card" style="margin-top:14px">
-        <h3>How access works</h3>
-        <div class="hint">Two permissions, deliberately separate.</div>
-        <dl class="kv">
-          <dt><code class="mono">resourcemanager.projects.get</code></dt><dd>Lets OpsMind <strong>see</strong> a project. Usually granted once as <code class="mono">roles/browser</code> at the organization level.</dd>
-          <dt><code class="mono">logging.viewer</code></dt><dd>Lets OpsMind <strong>read</strong> that project's logs. Granted per project, because log access is not something to hand out organization-wide by default.</dd>
-        </dl>
-      </div>
-    </section>
+
 
     <!-- INSIGHTS -->
     <section class="view" id="view-insights">
       <h2>Insights</h2>
-      <div class="lede">Repeating log patterns and statistical anomalies. Both are deterministic: identical inputs always produce identical findings, and every finding carries the evidence behind it.</div>
-      <div class="card" style="margin-bottom:14px">
-        <h3>Anomalies <span class="tier live">live</span></h3>
-        <div class="hint">Each series compared against its own recent baseline. A fixed threshold cannot answer "is this unusual <em>for this service</em>?" — a service that normally serves 2 req/min jumping to 20 is a tenfold change no threshold would catch.</div>
-        <div id="anomalyList"></div>
+      <div class="lede">Anomalies, breached thresholds, their likely causes and what to do.</div>
+      <div class="grid g4" id="insTiles"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Statistical</div><h2 class="sec-title" id="anomTitle">Anomalies</h2></div><span id="anomChip"></span></div>
+      <div id="anomalyList"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Thresholds</div><h2 class="sec-title">Incidents</h2></div><span id="incChip"></span></div>
+      <div class="card flush"><div style="overflow-x:auto"><table class="pat-table find-table" id="findTable"></table></div></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Patterns</div><h2 class="sec-title">Failure patterns</h2></div><span class="faint ins-note" id="patNote"></span></div>
+      <div class="card flush"><div style="overflow-x:auto"><table class="pat-table" id="failPatTable"></table></div></div>
+    </section>
+
+    <!-- PERFORMANCE -->
+    <section class="view" id="view-performance">
+      <h2>Performance</h2>
+      <div class="lede">Latency percentiles, throughput and every route.</div>
+      <div class="grid g4" id="perfTiles"></div>
+      <div class="grid g2" style="margin-top:12px">
+        <div class="card chart-card">
+          <div class="card-row"><h3>Latency percentiles</h3><div class="legend-inline" id="perfLatLegend"></div></div>
+          <div class="chart-wrap"><canvas id="chPerfLat"></canvas></div>
+        </div>
+        <div class="card chart-card">
+          <div class="card-row"><h3>Throughput and failures</h3><div class="legend-inline" id="perfTpLegend"></div></div>
+          <div class="chart-wrap"><canvas id="chPerfTp"></canvas></div>
+        </div>
       </div>
-      <div class="card">
-        <h3>Log patterns</h3>
-        <div class="hint" id="patternHint">Every log line clustered by message template — identifiers, hashes, quoted strings and measurements are masked, then identical templates counted. Click a pattern to see its logs.</div>
-        <div style="overflow-x:auto"><table id="patternTable"></table></div>
-      </div>
+      <div class="sec-head"><div><div class="eyebrow-label">Routes</div><h2 class="sec-title" id="perfRoutesTitle">All routes</h2></div></div>
+      <div class="card flush"><div style="overflow-x:auto"><table class="pat-table" id="perfRoutes"></table></div></div>
     </section>
 
     <!-- SERVICES -->
     <section class="view" id="view-services">
       <h2>Services</h2>
-      <div class="lede">Health broken down per workload. Click any service to inspect its logs.</div>
-      <div class="grid g2" id="serviceCards"></div>
+      <div class="lede">Health broken down per workload.</div>
+      <div class="grid g4" id="svcTiles"></div>
+      <div id="serviceCards"></div>
     </section>
 
     <!-- SETUP -->
     <section class="view" id="view-setup">
       <h2>Setup</h2>
-      <div class="lede">What is feeding this dashboard, and how fresh each tier is.</div>
-      <div class="grid g2" id="setupTop"></div>
-      <div class="card" style="margin-top:14px">
-        <h3>Latency tiers</h3>
-        <div class="hint">Cloud Monitoring lags by minutes and billing by about a day. Pretending otherwise would make the dashboard lie, so every panel is labelled with its tier.</div>
-        <div id="tierList"></div>
-      </div>
-      <div class="card" style="margin-top:14px">
-        <h3>Collectors</h3>
-        <div id="collectorList"></div>
-      </div>
+      <div class="lede">Platform, projects and the services OpsMind uses.</div>
+
+      <div class="grid g4" id="setupConn"></div>
+
+      <div class="sec-head"><div><div class="eyebrow-label">Projects</div><h2 class="sec-title" id="projects">Choose a project</h2></div></div>
+      <div id="projError"></div>
+      <div class="grid g3" id="projGrid"></div>
+
+      <div class="sec-head"><div><div class="eyebrow-label">Platforms</div><h2 class="sec-title">Cloud platforms</h2></div></div>
+      <div class="grid g3" id="setupPlatforms"></div>
+
+      <div class="sec-head"><div><div class="eyebrow-label">Google Cloud</div><h2 class="sec-title">In use</h2></div><span id="svcUsedChip"></span></div>
+      <div class="grid g3" id="setupServices"></div>
+
+      <div class="sec-head"><div><div class="eyebrow-label">Google Cloud</div><h2 class="sec-title">Available to connect</h2></div><span id="svcAvailChip"></span></div>
+      <div class="grid g3" id="setupAvailable"></div>
     </section>
 
     <!-- INCIDENTS -->
     <section class="view" id="view-incidents">
       <h2>Incidents</h2>
-      <div class="lede">Thresholds crossed, grouped by cause, with the fix. Expand one for its impact, suspected root cause, top errors, a sample trace and an explanation.</div>
-
+      <div class="lede">Thresholds crossed, grouped by cause, with the fix.</div>
       <div class="grid g4" id="incTiles"></div>
-      <div class="legend" id="incLegend"></div>
-      <div id="rootCauseBanner" style="margin-top:16px"></div>
-
-      <div class="card" style="margin-top:14px">
-        <h3>Breaching now</h3>
-        <div class="hint">Conditions currently outside their threshold. These need someone.</div>
-        <div id="incBreaching"></div>
-      </div>
-
-      <div class="card" style="margin-top:14px">
-        <h3>Resolved in this window</h3>
-        <div class="hint">Stopped breaching on their own. Worth a look, not an interruption.</div>
-        <div id="incResolved"></div>
-      </div>
+      <div class="legend inc-legend" id="incLegend"></div>
+      <div id="rootCauseBanner"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Now</div><h2 class="sec-title">Breaching</h2></div><span id="incBreachChip"></span></div>
+      <div id="incBreaching" class="inc-list"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">This window</div><h2 class="sec-title">Resolved</h2></div><span id="incResolvedChip"></span></div>
+      <div id="incResolved" class="inc-list"></div>
     </section>
   </main>
 </div>
@@ -279,6 +326,25 @@
     <button class="btn" id="drawerClose">✕</button>
   </div>
   <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<!-- Product guide. Answers questions about OpsMind itself from a manifest
+     generated by the running app, so it cannot describe a view that is not
+     there or report a configuration that is no longer true. -->
+<button class="guide-fab" id="guideFab" title="Ask about OpsMind">?</button>
+<aside class="guide-panel" id="guidePanel" hidden>
+  <div class="guide-head">
+    <div>
+      <strong>Ask about OpsMind</strong>
+      <div class="faint" style="font-size:11.5px" id="guideProvider">grounded in this instance</div>
+    </div>
+    <button class="btn" id="guideClose">&times;</button>
+  </div>
+  <div class="guide-body" id="guideBody"></div>
+  <div class="guide-foot">
+    <input type="text" id="guideInput" placeholder="What does the Incidents view show?">
+    <button class="btn primary" id="guideSend">Ask</button>
+  </div>
 </aside>
 
 <script src="/static/app.js"></script>
