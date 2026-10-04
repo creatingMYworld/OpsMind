@@ -124,3 +124,26 @@ Local mode keeps everything in memory, so a restart empties it. To see the
 UI with data, POST CogniKart-shaped entries to `/internal/ingest`. Requests
 are only counted for events starting `http.request` with an `httpStatus`;
 CPU comes from `service.heartbeat` events with `cpuPct`.
+
+## Status and next work (2026-10-04)
+
+Local branch `ui-updates` is two commits ahead of `origin/opsmind-staging`
+(`67d6a26` docs, `5b0c422` Services/Logs/Setup/Insights). Not pushed yet.
+
+Requested next, in this order:
+
+1. **Resources**: add charts. Reference: four cards in a 2×2 grid, each one
+   line or area chart with its own unit: CPU utilisation (%), Memory, Database
+   connections, Instance count. One chart per unit, never two y-axes. Note the
+   reference's memory axis reads "00MB": fix units so ticks are legible.
+2. **Cost, optimization centre**: clean tiles and layout, and a summary from
+   Gemini. Wherever AI writes text, tag it visibly as AI-generated (Gemini on
+   Vertex AI). When AI is off, fall back to the deterministic summary and do
+   not show the AI tag.
+3. **Alerts**: redesign into a neat, structured layout (rules as tiles or a
+   table with threshold, window, state).
+4. **Setup**: tidy to the reference (platform row; In use; Available to
+   connect; consistent tile heights and spacing). Clicking an **In use**
+   service opens its **cost**: what that Google Cloud service costs in the
+   modeled spend (use `/api/v1/cost` drivers: CPU and memory map to Cloud Run,
+   requests to Cloud Run requests, logging to Cloud Logging).
