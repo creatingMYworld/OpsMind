@@ -548,31 +548,56 @@ function renderActions(q) {
     box.innerHTML = `<div class="empty">Nothing needs attention. Traffic is healthy and no recommendation is outstanding.</div>`;
     return;
   }
+  // Closed: two lines (status + title, then one-line reason). Open: the same
+  // facts in fixed, labelled rows, so each one is found by position.
+  const openKey = state.openAction;
   box.innerHTML = q.actions.map((a, i) => {
     const sev = { CRITICAL: "crit", HIGH: "err", MEDIUM: "warn", LOW: "muted" }[a.severity] || "muted";
     const imp = a.impact || {};
     const bits = [];
-    if (imp.revenueAtRiskInr) bits.push(`<span class="saving">${inr(imp.revenueAtRiskInr)} at risk</span>`);
-    if (imp.cloudCostPerHourUsd) bits.push(`<span class="delta-up">${usd(imp.cloudCostPerHourUsd)}/hr</span>`);
-    if (imp.savingPerMonthUsd) bits.push(`<span class="saving">saves ${usd(imp.savingPerMonthUsd)}/mo</span>`);
+    if (imp.revenueAtRiskInr) bits.push(`${inr(imp.revenueAtRiskInr)} revenue at risk`);
+    if (imp.cloudCostPerHourUsd) bits.push(`${usd(imp.cloudCostPerHourUsd)}/hr cloud cost`);
+    if (imp.savingPerMonthUsd) bits.push(`saves ${usd(imp.savingPerMonthUsd)}/mo`);
     const cond = (a.evidence && a.evidence.conditions) || [];
-    return `<div class="rec ${a.severity}" data-act="${i}" style="cursor:${a.link ? "pointer" : "default"}">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px">
-        <span class="pill ${a.firing ? "err" : "muted"}"><span class="dot"></span>${a.firing ? "firing" : "standing"}</span>
-        <span class="pill ${sev}">${esc(a.severity)}</span>
-        <strong>${esc(a.title)}</strong>
-        ${a.ageMinutes ? `<span class="faint" style="font-size:11.5px">${nf(a.ageMinutes, 0)}m</span>` : ""}
+    const key = a.id || a.title;
+    const open = openKey === key;
+    const row = (label, html) => html ? `<div class="act-row"><dt>${label}</dt><dd>${html}</dd></div>` : "";
+    return `<div class="act ${a.severity}${open ? " open" : ""}" data-act="${i}" data-key="${esc(key)}">
+      <button class="act-head" aria-expanded="${open}">
+        <span class="act-line1">
+          <span class="pill ${a.firing ? "err" : "muted"}"><span class="dot"></span>${a.firing ? "firing" : "standing"}</span>
+          <span class="pill ${sev}">${esc(a.severity)}</span>
+          <strong class="act-title">${esc(a.title)}</strong>
+          <span class="act-age faint">${a.ageMinutes ? nf(a.ageMinutes, 0) + "m" : ""}</span>
+          <span class="act-chev" aria-hidden="true">▾</span>
+        </span>
+        <span class="act-line2">${esc(a.whyItMatters)}</span>
+      </button>
+      <div class="act-body"${open ? "" : " hidden"}>
+        <dl>
+          ${row("Why it matters", esc(a.whyItMatters))}
+          ${row("First step", esc(a.firstStep))}
+          ${row("Fixed when", esc(a.howYouWillKnow))}
+          ${row("Impact", bits.map(esc).join(" · "))}
+          ${row("Conditions", cond.map(c => `<code>${esc(c.rule)}</code>`).join(" "))}
+        </dl>
+        ${a.link ? `<button class="btn act-go" data-go="${i}">Investigate →</button>` : ""}
       </div>
-      <div class="why">${esc(a.whyItMatters)}</div>
-      <div style="font-size:12.5px;margin-top:5px"><span class="faint">First step —</span> ${esc(a.firstStep)}</div>
-      <div style="font-size:12px;margin-top:3px" class="faint">You'll know it worked when: ${esc(a.howYouWillKnow)}</div>
-      ${cond.length ? `<div class="faint" style="font-size:11.5px;margin-top:5px">${cond.length} condition(s): ${cond.map(c => esc(c.rule)).join(" · ")}</div>` : ""}
-      ${bits.length ? `<div style="font-size:12.5px;margin-top:5px">${bits.join(" &nbsp;·&nbsp; ")}</div>` : ""}
     </div>`;
   }).join("");
-  $$("#actionQueue [data-act]").forEach(el => el.addEventListener("click", () => {
-    const a = q.actions[+el.dataset.act];
-    if (!a.link) return;
+
+  $$("#actionQueue .act-head").forEach(h => h.addEventListener("click", () => {
+    const el = h.closest(".act"), key = el.dataset.key;
+    state.openAction = state.openAction === key ? null : key;
+    $$("#actionQueue .act").forEach(x => {
+      const on = x.dataset.key === state.openAction;
+      x.classList.toggle("open", on);
+      x.querySelector(".act-head").setAttribute("aria-expanded", on);
+      x.querySelector(".act-body").hidden = !on;
+    });
+  }));
+  $$("#actionQueue [data-go]").forEach(btn => btn.addEventListener("click", () => {
+    const a = q.actions[+btn.dataset.go];
     const { view, ...rest } = a.link;
     if (view === "incidents" && a.link.incident) showIncident(a.link.incident);
     else go(view, rest);

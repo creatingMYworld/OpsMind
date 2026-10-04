@@ -527,3 +527,26 @@ button.tb-btn:hover, label.tb-btn:hover { color: var(--text); border-color: colo
 
 /* Health is stated in the overview strip; the top bar keeps the element only for scripts. */
 #healthPill { display: none !important; }
+
+
+/* ---------- attention items: two lines closed, labelled rows open ---------- */
+.act { border: 1px solid var(--border-soft); border-left: 3px solid var(--border); border-radius: 8px; margin-top: 8px; background: var(--bg-elev2); }
+.act.CRITICAL, .act.HIGH { border-left-color: var(--err); }
+.act.MEDIUM { border-left-color: var(--warn); }
+.act-head { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 10px 14px; cursor: pointer; }
+.act-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
+.act-line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.act-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+.act-age { font-size: 11.5px; flex: none; }
+.act-chev { flex: none; color: var(--text-faint); transition: transform .15s; }
+.act.open .act-chev { transform: rotate(180deg); }
+.act-line2 { display: block; margin-top: 4px; color: var(--text-dim); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act.open .act-line2 { display: none; }
+.act-body { padding: 2px 14px 12px; border-top: 1px solid var(--border-soft); }
+.act-body dl { margin: 0; }
+.act-row { display: grid; grid-template-columns: 130px 1fr; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.act-row:last-child { border-bottom: 0; }
+.act-row dt { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding-top: 2px; }
+.act-row dd { margin: 0; line-height: 1.5; }
+.act-go { margin-top: 10px; }
+@media (max-width: 640px) { .act-row { grid-template-columns: 1fr; gap: 2px; } }
