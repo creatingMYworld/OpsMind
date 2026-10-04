@@ -194,6 +194,62 @@ $("#drawerClose").addEventListener("click", closeDrawer);
 $("#drawerBg").addEventListener("click", closeDrawer);
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
 
+/* ---------- toast ----------
+   Short confirmation in the corner. Setup's project switch already called
+   toast() before it existed, so a successful switch threw and never reached
+   the Overview; defining it fixes that path too. */
+function toast(msg) {
+  let el = $("#toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "toast"; el.setAttribute("role", "status"); el.setAttribute("aria-live", "polite");
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+/* ---------- project picker ----------
+   Same switch as the Open button in Setup: POST /projects/select. Projects
+   this installation can list but not read are shown, disabled, so a missing
+   permission is visible rather than silently absent. */
+const MANAGE = "__manage__";
+async function loadProjectPicker() {
+  const sel = $("#projectSel");
+  if (!sel) return;
+  let d;
+  try { d = await api("/api/v1/projects"); } catch { return; }
+  const list = d.projects || [];
+  sel.innerHTML = list.map(p =>
+    `<option value="${esc(p.projectId)}"${p.active ? " selected" : ""}${p.connected === false ? " disabled" : ""}>` +
+    `${esc(p.displayName || p.projectId)}${p.connected === false ? " (no log access)" : ""}</option>`).join("") +
+    `<option disabled>──────────</option><option value="${MANAGE}">Manage projects…</option>`;
+  sel.dataset.current = (list.find(p => p.active) || {}).projectId || "";
+}
+$("#projectSel").addEventListener("change", async e => {
+  const sel = e.target, id = sel.value;
+  if (id === MANAGE) { sel.value = sel.dataset.current; go("setup"); return; }
+  if (!id || id === sel.dataset.current) return;
+  sel.disabled = true;
+  try {
+    await api("/api/v1/projects/select", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: id }),
+    });
+    sel.dataset.current = id;
+    state.logs = [];
+    toast(`Now viewing ${sel.options[sel.selectedIndex].text}`);
+    await refresh();
+  } catch (err) {
+    sel.value = sel.dataset.current;
+    toast("Could not switch: " + err.message);
+  } finally {
+    sel.disabled = false;
+  }
+});
+
 /* ---------- meta / header ---------- */
 async function loadMeta() {
   const m = await api("/api/v1/meta"); state.meta = m;
@@ -481,7 +537,11 @@ function renderStatusStrip(o, cls) {
     `<div class="strip-head">
        <span class="strip-name">${esc(project)}</span>
        <span class="strip-meta mono">${esc(meta)}</span>
-       <span class="strip-fresh">live · ${state.window}-minute window</span>
+       <span class="strip-fresh" title="Last refreshed">
+         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg>
+         Refreshed ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+         <span class="strip-fresh-sep">·</span>${state.window}-min window
+       </span>
      </div>
      <div class="strip-row">
        <div class="strip-cell strip-lead" style="--lead:var(${tone})">
@@ -1038,6 +1098,7 @@ async function loadProjects() {
       });
       state.logs = [];
       toast(`Now viewing ${b.dataset.open}`);
+      loadProjectPicker();
       go("overview");
     } catch (e) {
       toast("Could not switch: " + e.message);
@@ -1619,6 +1680,7 @@ async function refresh() {
 
 (async function init() {
   applyChartTheme();
+  loadProjectPicker();
   decorateNav();
   decorateHeadings();
   startStream();

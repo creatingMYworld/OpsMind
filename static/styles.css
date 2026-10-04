@@ -625,3 +625,50 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+
+/* ---------- project picker ---------- */
+.tb-project { color: var(--text); max-width: 260px; }
+.tb-project select {
+  appearance: none; -webkit-appearance: none; background: none; border: 0; padding: 0;
+  color: var(--text); font: 600 13px/1 var(--sans); cursor: pointer; min-width: 0;
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+}
+.tb-project select:focus { outline: none; }
+.tb-project:focus-within { border-color: var(--accent); }
+.tb-project select option { background: var(--bg-elev2); color: var(--text); }
+.tb-project > svg:first-child { color: var(--accent); flex: none; }
+.tb-project > svg:last-child { color: var(--text-faint); flex: none; }
+
+/* ---------- strip freshness ---------- */
+.strip-fresh { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.strip-fresh svg { color: var(--ok); }
+.strip-fresh-sep { color: var(--text-faint); }
+
+/* ---------- pills, refined ----------
+   Softer: a quiet tint, a thin same-hue edge, square-ish corners, small
+   caps-height type. State still reads from the word, never colour alone. */
+.pill {
+  height: 22px; padding: 0 8px; border-radius: 6px; gap: 6px;
+  font-size: 11px; font-weight: 600; letter-spacing: .3px; line-height: 1;
+  border-width: 1px;
+}
+.pill .dot { width: 6px; height: 6px; }
+.pill.ok   { background: color-mix(in srgb, var(--ok) 10%, transparent);   border-color: color-mix(in srgb, var(--ok) 26%, transparent); }
+.pill.warn { background: color-mix(in srgb, var(--warn) 10%, transparent); border-color: color-mix(in srgb, var(--warn) 26%, transparent); }
+.pill.err  { background: color-mix(in srgb, var(--err) 10%, transparent);  border-color: color-mix(in srgb, var(--err) 26%, transparent); }
+.pill.info { background: color-mix(in srgb, var(--accent) 10%, transparent); border-color: color-mix(in srgb, var(--accent) 26%, transparent); color: var(--accent); }
+.pill.muted { background: var(--bg-elev2); border-color: var(--border); }
+.pill.crit { background: color-mix(in srgb, var(--crit) 16%, transparent); border-color: color-mix(in srgb, var(--crit) 40%, transparent); color: #ff6b87; }
+:root[data-theme="light"] .pill.crit { color: var(--crit); }
+/* A firing item's dot breathes, so "live" reads without an extra word. */
+.act .pill.err .dot { animation: pulse 2.4s ease-in-out infinite; }
+
+#toast {
+  position: fixed; right: 20px; bottom: 20px; z-index: 100;
+  padding: 10px 14px; border-radius: 8px; font-size: 13px;
+  background: var(--bg-elev2); color: var(--text); border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0,0,0,.3);
+  opacity: 0; transform: translateY(6px); transition: opacity .18s, transform .18s; pointer-events: none;
+}
+#toast.show { opacity: 1; transform: none; }
