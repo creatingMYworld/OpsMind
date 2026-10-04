@@ -144,6 +144,8 @@ function applyRoute() {
     if (params.severity !== undefined) $("#logSev").value = params.severity;
     if (params.service !== undefined) $("#logSvc").value = params.service;
     if (params.q !== undefined) $("#logQ").value = params.q;
+    if (params.status !== undefined) $("#logStatus").value = params.status;
+    if (params.route !== undefined) $("#logRoute").value = params.route;
     state.logs = [];
     startStream();
   }
@@ -837,63 +839,117 @@ function recCard(r) {
 
 /* ---------- logs (SSE) ---------- */
 function sevOrder(s) { return { DEBUG: 0, INFO: 1, WARNING: 2, ERROR: 3, CRITICAL: 4 }[s] ?? 1; }
+const statusClass = s => s == null ? "" : String(Math.floor(s / 100));
+function logMatchesLocal(e) {
+  // Status and route are filtered here; the API filters severity, service,
+  // event and search. Both views run on the same buffer.
+  const st = $("#logStatus").value, rt = $("#logRoute").value;
+  if (st && statusClass(e.httpStatus) !== st) return false;
+  if (rt && e.route !== rt) return false;
+  return true;
+}
 function logRow(e) {
+  const s = e.httpStatus;
   return `<tr data-log='${esc(JSON.stringify(e))}' class="clickable">
-    <td class="faint">${hms(e.ts)}</td>
-    <td><span class="sev ${esc(e.severity)}">${esc(e.severity)}</span></td>
-    <td>${esc((e.service || "").replace("cognikart-", ""))}</td>
-    <td class="faint">${esc(e.event || "")}</td>
-    <td><span class="msg">${esc(e.message || "")}</span></td>
-    <td class="num" style="color:${(e.httpStatus || 0) >= 500 ? "var(--err)" : (e.httpStatus || 0) >= 400 ? "var(--warn)" : "inherit"}">${e.httpStatus ?? ""}</td>
-    <td class="num">${e.latencyMs != null ? nf(e.latencyMs) + "ms" : ""}</td>
+    <td class="num faint">${hms(e.ts)}</td>
+    <td><span class="sev-tag" style="--c:var(${sevVar(e.severity)})"><span class="dot"></span>${esc(e.severity)}</span></td>
+    <td class="mono">${esc(e.event || "")}</td>
+    <td class="faint">${esc(svcShort(e.service))}</td>
+    <td class="mono faint">${esc(e.route || "")}</td>
+    <td class="num" style="color:${s >= 500 ? "var(--err)" : s >= 400 ? "var(--warn)" : s ? "var(--ok)" : "inherit"}">${s ?? ""}</td>
+    <td class="num" style="color:${(e.latencyMs || 0) > 500 ? "var(--warn)" : "inherit"}">${e.latencyMs != null ? nf(e.latencyMs) + "ms" : ""}</td>
   </tr>`;
 }
+const sevVar = s => ({ ERROR: "--err", CRITICAL: "--err", WARNING: "--warn" }[s] || "--text-faint");
 function renderLogs() {
+  // Newest first: the initial fetch and the stream arrive in ingest order.
+  const rows = state.logs.filter(logMatchesLocal).sort((a, b) => b.ts - a.ts);
   const body = $("#logBody");
-  body.innerHTML = state.logs.slice(0, 400).map(logRow).join("");
-  $("#logCount").textContent = `${state.logs.length} buffered${state.paused ? " · paused" : " · live"}`;
-  $$("#logBody tr").forEach(tr => tr.addEventListener("click", () => showLogDetail(JSON.parse(tr.dataset.log))));
+  body.innerHTML = rows.length
+    ? rows.slice(0, 300).map(logRow).join("")
+    : `<tr><td colspan="7" class="empty">No entries match these filters.</td></tr>`;
+  const total = state.logTotal ?? state.logs.length;
+  $("#logCount").innerHTML = `<b>${nf(total)}</b> matching · ${nf(Math.min(rows.length, 300))} shown${state.paused ? " · paused" : ""}`;
+  $$("#logBody tr[data-log]").forEach(tr => tr.addEventListener("click", () => showLogDetail(JSON.parse(tr.dataset.log))));
 }
 function startStream() {
   if (state.es) state.es.close();
-  const sev = $("#logSev").value, svc = $("#logSvc").value, q = $("#logQ").value.trim();
+  const sev = $("#logSev").value, svc = $("#logSvc").value, q = $("#logQ").value.trim(), ev = $("#logEvent").value;
   const p = new URLSearchParams();
   if (sev) p.set("severity", sev);
   if (svc) p.set("service", svc);
   if (q) p.set("q", q);
+  if (ev) p.set("event", ev);
   const es = new EventSource("/api/v1/logs/stream?" + p.toString());
   state.es = es;
-  es.addEventListener("logs", ev => {
+  es.addEventListener("logs", e => {
     if (state.paused) return;
-    const batch = JSON.parse(ev.data);
+    const batch = JSON.parse(e.data);
     state.logs = batch.reverse().concat(state.logs).slice(0, state.maxLogs);
+    if (state.logTotal != null) state.logTotal += batch.length;
     if (state.view === "logs") renderLogs();
   });
   es.onerror = () => { /* EventSource reconnects on its own */ };
 }
-["logSev", "logSvc"].forEach(id => $("#" + id).addEventListener("change", () => { state.logs = []; startStream(); loadLogsInitial(); }));
-let qTimer; $("#logQ").addEventListener("input", () => { clearTimeout(qTimer); qTimer = setTimeout(() => { state.logs = []; startStream(); loadLogsInitial(); }, 350); });
+function logFiltersChanged() { state.logs = []; startStream(); loadLogsInitial(); }
+["logSev", "logSvc", "logEvent", "logStatus", "logRoute"].forEach(id => $("#" + id).addEventListener("change", logFiltersChanged));
+let qTimer; $("#logQ").addEventListener("input", () => { clearTimeout(qTimer); qTimer = setTimeout(logFiltersChanged, 350); });
+const PAUSE_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>';
+const PLAY_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M7 5v14l12-7z"/></svg>';
+$("#logPause").innerHTML = PAUSE_ICON;
 $("#logPause").addEventListener("click", () => {
   state.paused = !state.paused;
-  $("#logPause").textContent = state.paused ? "▶ Resume" : "⏸ Pause";
+  $("#logPause").innerHTML = state.paused ? PLAY_ICON : PAUSE_ICON;
+  $("#logPause").title = state.paused ? "Resume live stream" : "Pause live stream";
   renderLogs();
 });
-$("#logClear").addEventListener("click", () => { state.logs = []; renderLogs(); });
+
+/* An error filter is "Error severity or worse, or 5xx status". */
+const errorFilterOn = () => ["ERROR", "CRITICAL"].includes($("#logSev").value) || $("#logStatus").value === "5";
 
 async function loadLogsInitial() {
-  const sev = $("#logSev").value, svc = $("#logSvc").value, q = $("#logQ").value.trim();
-  const p = new URLSearchParams({ limit: "300" });
+  const sev = $("#logSev").value, svc = $("#logSvc").value, q = $("#logQ").value.trim(), ev = $("#logEvent").value;
+  const p = new URLSearchParams({ limit: "500", sinceS: String(state.window * 60) });
   if (sev) p.set("severity", sev);
   if (svc) p.set("service", svc);
   if (q) p.set("q", q);
-  const r = await api("/api/v1/logs?" + p.toString());
-  state.logs = r.entries; renderLogs();
-  const pts = await api(`/api/v1/metrics/series?window=${state.window}`);
-  const lv = complete(pts.points);
-  upsert("logvol", "chLogVol", "line", {
-    labels: lv.map(p => hhmm(p.ts)),
-    datasets: [ds("MiB/min", lv.map(p => p.logBytes / 1048576), css("--cost"), true)],
-  });
+  if (ev) p.set("event", ev);
+  const [r, pts, routes] = await Promise.all([
+    api("/api/v1/logs?" + p.toString()),
+    api(`/api/v1/metrics/series?window=${state.window}${svc ? "&service=" + encodeURIComponent(svc) : ""}`),
+    api(`/api/v1/routes?window=${state.window}&limit=200`).catch(() => null),
+  ]);
+  state.logs = r.entries; state.logTotal = r.total;
+
+  // Route and event choices come from what is actually in the window.
+  const keep = (sel, values) => {
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">All</option>` + values.map(v => `<option${v === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
+  };
+  keep($("#logRoute"), [...new Set((routes ? routes.routes : []).map(x => x.route))].sort());
+  keep($("#logEvent"), [...new Set(r.entries.map(x => x.event).filter(Boolean)).add(ev)].filter(Boolean).sort());
+  renderLogs();
+
+  // Matching volume: severities at or above the chosen one.
+  const nowMin = Math.floor(Date.now() / 60000);
+  const lv = complete(pts.points).filter(x => Math.floor(x.ts / 60) < nowMin);
+  const floor = sevOrder(sev || "DEBUG");
+  const groups = SEV_GROUPS.filter(g => g.from.some(k => sevOrder(k) >= floor));
+  upsert("logvol", "chLogVol", "bar", {
+    labels: lv.map(x => hhmm(x.ts)),
+    datasets: groups.map(g => ({
+      label: g.label, data: lv.map(x => sevOf(x, g)),
+      backgroundColor: g.key === "INFO" ? css("--text-faint") + "8c" : css(g.color),
+      stack: "s", borderRadius: 2, barPercentage: .62, categoryPercentage: .9, maxBarThickness: 18,
+      borderColor: css("--bg-elev"), borderWidth: { top: 2, right: 0, bottom: 0, left: 0 }, borderSkipped: false,
+    })),
+  }, { plugins: { legend: { display: false } }, scales: {
+      x: { stacked: true, grid: { display: false }, ticks: { color: css("--text-faint"), maxRotation: 0, autoSkipPadding: 26 } },
+      y: { stacked: true, grid: { color: css("--border-soft") }, border: { display: false }, ticks: { color: css("--text-faint"), maxTicksLimit: 5 }, beginAtZero: true } } });
+  $("#logVolLegend").innerHTML = groups.map(g => `<span><i style="background:var(${g.color})"></i>${g.label}</span>`).join("");
+
+  $("#errBlock").hidden = !errorFilterOn();
+  if (errorFilterOn()) await loadErrors();
 }
 async function showLogDetail(e) {
   let traceHtml = `<div class="faint">No trace id on this entry.</div>`;
@@ -928,48 +984,34 @@ function renderWaterfall(t) {
 
 /* ---------- errors ---------- */
 async function loadErrors() {
-  const [e, pts] = await Promise.all([
-    api(`/api/v1/errors?window=${state.window}`),
-    api(`/api/v1/metrics/series?window=${state.window}`),
-  ]);
+  const svc = $("#logSvc").value;
+  const e = await api(`/api/v1/errors?window=${state.window}&limit=50`);
+  const groups = e.groups.filter(g => !svc || g.service === svc);
   const t = e.totals;
+  const top = groups[0];
+  const atRisk = groups.reduce((s, g) => s + (g.revenueAtRiskInr || 0), 0);
   $("#errTiles").innerHTML = [
-    tile("Server errors (5xx)", nf(t.errors5xx), "genuine service faults", t.errors5xx ? "err" : "ok"),
-    tile("Client errors (4xx)", nf(t.errors4xx), "bad requests — not service faults", "warn"),
-    tile("Error groups", nf(e.groups.length), esc(e.groupingKey)),
+    linkTile({ label: "Server errors (5xx)", value: nf(t.errors5xx), valueColor: t.errors5xx ? "--err" : "--ok",
+               foot: `${t.requests ? pct(t.errors5xx / t.requests * 100, 2) : "0%"} of requests`, href: "#logs?severity=ERROR" }),
+    linkTile({ label: "Error groups", value: nf(groups.length), foot: svc ? svcShort(svc) : "all services", href: "#logs?severity=ERROR" }),
+    linkTile({ label: "Top error", value: top ? nf(top.count) : "0", valueColor: top ? "--err" : null,
+               foot: top ? `${esc(top.errorCode)} · ${esc(svcShort(top.service))}` : "none", href: "#logs?severity=ERROR" }),
+    linkTile({ label: "Revenue at risk", value: atRisk ? inr(atRisk) : "—", valueColor: atRisk ? "--warn" : null,
+               foot: "from failed checkouts", href: "#cost" }),
   ].join("");
-  const ep = complete(pts.points);
-  upsert("errors", "chErrors", "line", {
-    labels: ep.map(p => hhmm(p.ts)),
-    datasets: [ds("5xx", ep.map(p => p.errors5xx), css("--err"), true),
-               ds("4xx", ep.map(p => p.errors4xx), css("--warn"), true)],
-  });
-  upsert("errsplit", "chErrSplit", "doughnut", {
-    labels: ["5xx server", "4xx client", "successful"],
-    datasets: [{ data: [t.errors5xx, t.errors4xx, Math.max(0, t.requests - t.errors5xx - t.errors4xx)],
-                 backgroundColor: [css("--err"), css("--warn"), css("--ok")],
-                 borderColor: css("--bg-elev"), borderWidth: 2 }],
-  }, { scales: null, cutout: "62%" });
+  $("#errChip").innerHTML = groups.length ? chip(`${nf(groups.length)} error group${groups.length === 1 ? "" : "s"}`, "--err") : chip("No errors", "--ok");
 
-  $("#errTable").innerHTML = e.groups.length === 0
+  $("#errTable").innerHTML = groups.length === 0
     ? `<tbody><tr><td class="empty">No errors in this window.</td></tr></tbody>`
-    : `<thead><tr><th>Error code</th><th>Service</th><th>Route</th><th class="right">Count</th><th class="right">Revenue at risk</th><th>Last seen</th></tr></thead><tbody>` +
-      e.groups.map((g, i) => `<tr class="clickable" data-g="${i}">
-        <td><strong style="color:var(--err)">${esc(g.errorCode)}</strong><div class="faint" style="font-size:11px">${esc(g.errorClass)}</div></td>
-        <td>${esc(g.service.replace("cognikart-", ""))}</td>
+    : `<thead><tr><th>Error code</th><th>Service</th><th>Route</th><th class="right">Count</th><th class="right">Revenue at risk</th><th class="right">Last seen</th></tr></thead><tbody>` +
+      groups.map((g, i) => `<tr class="clickable" data-g="${i}">
+        <td><div class="mono" style="color:var(--err);font-weight:600">${esc(g.errorCode)}</div><div class="faint pat-sub">${esc(g.errorClass || g.pattern || "")}</div></td>
+        <td class="mono">${esc(svcShort(g.service))}</td>
         <td class="mono faint">${esc(g.route || "—")}</td>
-        <td class="num">${nf(g.count)}</td>
+        <td class="num pat-count">${nf(g.count)}</td>
         <td class="num">${g.revenueAtRiskInr ? inr(g.revenueAtRiskInr) : "—"}</td>
-        <td class="faint">${hms(g.lastSeen)}</td></tr>`).join("") + `</tbody>`;
-  $$("#errTable [data-g]").forEach(tr => {
-    tr.addEventListener("click", ev => {
-      const g = e.groups[+tr.dataset.g];
-      // Shift-click goes straight to the filtered logs; a plain click opens
-      // the group, which is the more common intent.
-      if (ev.shiftKey) go("logs", { q: g.errorCode, service: g.service, severity: "WARNING" });
-      else showErrorGroup(g);
-    });
-  });
+        <td class="num faint">${ago(g.lastSeen)}</td></tr>`).join("") + `</tbody>`;
+  $$("#errTable [data-g]").forEach(tr => tr.addEventListener("click", () => showErrorGroup(groups[+tr.dataset.g])));
 }
 async function showErrorGroup(g) {
   let trace = "";
@@ -1116,70 +1158,104 @@ async function loadProjects() {
 
 /* ---------- insights: patterns and anomalies ---------- */
 async function loadInsights() {
-  const [an, pat] = await Promise.all([
+  const [an, pat, inc, ov, errs] = await Promise.all([
     api(`/api/v1/anomalies?window=${Math.max(state.window, 20)}`),
     api(`/api/v1/patterns?window=${state.window}&limit=60`),
+    api(`/api/v1/incidents?window=${Math.max(state.window, 60)}`),
+    api(`/api/v1/overview?window=${state.window}`),
+    api(`/api/v1/errors?window=${state.window}&limit=100`).catch(() => ({ groups: [] })),
   ]);
-  const all = pat.patterns || [];
-  const failing = all.filter(p => p.severity !== "INFO" && p.severity !== "DEBUG");
-  const top = failing[0];
   const anoms = an.anomalies || [];
+  const groups = [...(inc.breaching || []), ...(inc.resolved || [])];
+  const actions = (ov.actions && ov.actions.actions) || [];
+  const failing = (pat.patterns || []).filter(p => p.severity !== "INFO" && p.severity !== "DEBUG");
+  const watched = (state.meta && state.meta.config.watchedServices) || [];
+
+  // Likely cause, from evidence: the most frequent error on that service.
+  const topErr = svc => (errs.groups || []).filter(g => !svc || g.service === svc).sort((a, b) => b.count - a.count)[0];
+  const causeHtml = svc => {
+    const e = topErr(svc);
+    return e ? `<span class="mono">${esc(e.errorCode)}</span> <span class="faint">×${nf(e.count)}${e.route ? " on " + esc(e.route) : ""}</span>`
+             : `<span class="faint">no dominant error</span>`;
+  };
+  const serviceOf = text => watched.find(w => String(text || "").includes(w)) || watched.find(w => String(text || "").includes(svcShort(w)));
+  const actionFor = g => actions.find(a => (a.link && a.link.incident && g.incidentIds && g.incidentIds.includes(a.link.incident))
+                                       || (g.service && a.title && a.title.includes(g.service)));
+  const impactOf = a => {
+    const i = (a && a.impact) || {}, bits = [];
+    if (i.revenueAtRiskInr) bits.push(inr(i.revenueAtRiskInr) + " at risk");
+    if (i.cloudCostPerHourUsd) bits.push(usd(i.cloudCostPerHourUsd) + "/hr");
+    return bits.join(" · ");
+  };
+  const atRisk = actions.reduce((s, a) => s + ((a.impact && a.impact.revenueAtRiskInr) || 0), 0);
+  const top = failing[0];
 
   $("#insTiles").innerHTML = [
-    linkTile({ label: "Distinct failure patterns", value: nf(failing.length),
-               foot: `of ${nf(pat.distinctPatterns)} patterns in ${nf(pat.total)} lines`, href: "#insights" }),
-    linkTile({ label: "Top pattern", value: top ? nf(top.count) : "0", valueColor: top && top.severity === "ERROR" ? "--err" : top ? "--warn" : null,
-               foot: top ? `${esc(svcShort((top.services || [])[0]))} · ${esc(top.topEvent || top.pattern)}` : "nothing repeating",
-               href: top ? buildHash("logs", { q: (top.errorCodes || [])[0] || top.topEvent || "", service: (top.services || [])[0] || "" }) : "#logs" }),
-    linkTile({ label: "Concentration", value: top ? pct(top.sharePct, 1) : "—",
-               foot: "share of the window carried by the top failure", href: "#insights" }),
     linkTile({ label: "Anomalies", value: nf(anoms.length), valueColor: anoms.length ? "--warn" : "--ok",
-               foot: `series beyond ${nf(an.sigma || 3, 1)}σ of their own baseline`, href: "#insights" }),
+               foot: `beyond ${nf(an.sigma || 3, 1)}σ of their own baseline`, href: "#insights" }),
+    linkTile({ label: "Breaching now", value: nf(inc.stats.breachingNow), valueColor: inc.stats.breachingNow ? "--err" : "--ok",
+               foot: `${nf(inc.stats.distinctIncidents)} incident(s) in window`, href: "#incidents" }),
+    linkTile({ label: "Revenue at risk", value: atRisk ? inr(atRisk) : "—", valueColor: atRisk ? "--warn" : null,
+               foot: "from open actions", href: "#incidents" }),
+    linkTile({ label: "Top failure", value: top ? nf(top.count) : "0", valueColor: top ? "--err" : null,
+               foot: top ? `${esc(svcShort((top.services || [])[0]))} · ${esc(top.topEvent || "")}` : "nothing repeating",
+               href: top ? buildHash("logs", { q: (top.errorCodes || [])[0] || top.topEvent || "" }) : "#logs" }),
   ].join("");
 
-  $("#anomTitle").textContent = `Anomalies · baseline-relative, ${nf(an.sigma || 3, 1)}σ`;
-  $("#anomNote").textContent = anoms.length ? `${nf(anoms.length)} found` : "";
+  $("#anomTitle").textContent = `Anomalies`;
+  $("#anomChip").innerHTML = anoms.length ? chip(`${nf(anoms.length)} beyond ${nf(an.sigma || 3, 1)}σ`, "--warn") : chip("All series normal", "--ok");
   $("#anomalyList").innerHTML = anoms.length === 0
-    ? `<div class="empty">No series is departing from its own baseline.</div>`
+    ? `<div class="card"><div class="empty">No series is departing from its own baseline.</div></div>`
     : anoms.map(a => {
-        const tone = a.severity === "CRITICAL" || a.severity === "HIGH" ? "--err" : "--warn";
-        const dir = a.direction === "up" ? "rose" : "fell";
+        const tone = a.severity === "HIGH" ? "--err" : "--warn";
+        const svc = serviceOf(a.metric) || serviceOf(a.label);
         const unit = a.unit ? " " + esc(a.unit) : "";
         return `<div class="anom-row" style="--tone:var(${tone})">
           <div class="anom-text">
-            <div class="anom-title">${esc(a.label)} ${dir} to ${nf(a.current, 1)}${unit}
-              ${a.changePct == null ? "" : `<span class="faint">(${a.changePct > 0 ? "+" : ""}${nf(a.changePct, 0)}% vs baseline)</span>`}</div>
-            <div class="anom-sub mono">baseline ${nf(a.baselineMean, 1)}${unit} · now ${nf(a.current, 1)}${unit}${a.baselineMinutes ? ` · ${nf(a.baselineMinutes)}m baseline` : ""}</div>
+            <div class="anom-title">${esc(a.label)} ${a.direction === "up" ? "rose" : "fell"} to ${nf(a.current, 1)}${unit}
+              ${a.changePct == null ? "" : `<span class="faint">${a.changePct > 0 ? "+" : ""}${nf(a.changePct, 0)}%</span>`}</div>
+            <div class="anom-sub"><span class="mono">baseline ${nf(a.baselineMean, 1)}${unit}</span> · likely cause: ${causeHtml(svc)}</div>
           </div>
           <div class="anom-z"><div class="anom-zv">${nf(Math.abs(a.zScore), 1)}σ</div><div class="faint">from baseline</div></div>
         </div>`;
       }).join("");
 
-  $("#patNote").textContent = `${nf(pat.total)} lines · ${nf(pat.distinctPatterns)} patterns`;
-  const table = (rows, empty) => {
-    if (!rows.length) return `<tbody><tr><td class="empty">${empty}</td></tr></tbody>`;
-    const max = Math.max(...rows.map(p => p.sharePct || 0), 0.0001);
-    return `<thead><tr><th>Pattern</th><th>Severity</th><th>Service</th><th class="right">Count</th>
-      <th>Share</th><th class="right">P95</th><th class="right">Last seen</th></tr></thead><tbody>` +
-      rows.map(p => {
-        const sev = (p.severity || "INFO").toUpperCase();
-        const tone = sev === "ERROR" || sev === "CRITICAL" ? "--err" : sev === "WARNING" ? "--warn" : "--text-faint";
-        const bar = sev === "ERROR" || sev === "CRITICAL" ? "--err" : "--accent";
-        return `<tr class="clickable" data-q="${esc((p.errorCodes || [])[0] || p.topEvent || "")}" data-svc="${esc((p.services || [])[0] || "")}">
-          <td class="pat-cell"><div class="mono pat-name">${esc(p.pattern)}</div><div class="mono faint pat-sub">${esc(p.topEvent || "")}</div></td>
-          <td><span class="sev-tag" style="--c:var(${tone})"><span class="dot"></span>${esc(sev)}</span></td>
-          <td class="mono">${esc((p.services || []).map(svcShort).join(", "))}</td>
-          <td class="num pat-count">${nf(p.count)}</td>
-          <td><div class="share"><span class="share-bar"><i style="width:${Math.max(3, (p.sharePct || 0) / max * 100).toFixed(1)}%;background:var(${bar})"></i></span><span class="faint">${nf(p.sharePct, 1)}%</span></div></td>
-          <td class="num">${p.p95LatencyMs == null ? "—" : nf(p.p95LatencyMs) + "ms"}</td>
-          <td class="num faint">${ago(p.lastSeen)}</td>
+  $("#incChip").innerHTML = inc.stats.breachingNow ? chip(`${nf(inc.stats.breachingNow)} breaching`, "--err") : chip("Nothing breaching", "--ok");
+  $("#findTable").innerHTML = groups.length === 0
+    ? `<tbody><tr><td class="empty">No threshold was crossed in this window.</td></tr></tbody>`
+    : `<thead><tr><th>Incident</th><th>Severity</th><th>Likely cause</th><th>Impact</th><th>Recommended action</th></tr></thead><tbody>` +
+      groups.map(g => {
+        const a = actionFor(g);
+        const sev = { CRITICAL: "crit", HIGH: "err", MEDIUM: "warn" }[g.severity] || "muted";
+        const root = g.correlation && g.correlation.suspectedRootCauseService;
+        return `<tr class="clickable" data-inc="${esc(g.primaryIncidentId || "")}">
+          <td><div class="find-title">${esc(g.title)}</div>
+              <div class="faint pat-sub">${g.status === "BREACHING" ? `<span style="color:var(--err)">● breaching</span>` : "resolved " + ago(g.resolvedAt)} · ${esc(g.summary || "")}</div></td>
+          <td><span class="pill ${sev}">${esc(g.severity)}</span></td>
+          <td>${root && root !== g.service ? `<span class="mono">${esc(svcShort(root))}</span> <span class="faint">upstream</span><br>` : ""}${causeHtml(g.service)}</td>
+          <td>${impactOf(a) || `<span class="faint">—</span>`}</td>
+          <td class="find-action">${a ? esc(a.firstStep) : `<span class="faint">Open logs for ${esc(svcShort(g.service))}</span>`}</td>
         </tr>`;
       }).join("") + `</tbody>`;
-  };
-  $("#failPatTable").innerHTML = table(failing.slice(0, 12), "No failure patterns in this window.");
-  // The API ranks failures first; this table is about volume, so rank by count.
-  $("#patternTable").innerHTML = table([...all].sort((a, b) => b.count - a.count).slice(0, 15), "No log lines in this window.");
-  $$("#failPatTable [data-q], #patternTable [data-q]").forEach(tr => tr.addEventListener("click", () =>
+  $$("#findTable [data-inc]").forEach(tr => tr.addEventListener("click", () => tr.dataset.inc ? showIncident(tr.dataset.inc) : go("incidents")));
+
+  $("#patNote").textContent = `${nf(failing.length)} of ${nf(pat.distinctPatterns)} patterns`;
+  const max = Math.max(...failing.map(p => p.sharePct || 0), 0.0001);
+  $("#failPatTable").innerHTML = !failing.length
+    ? `<tbody><tr><td class="empty">No failure patterns in this window.</td></tr></tbody>`
+    : `<thead><tr><th>Pattern</th><th>Severity</th><th>Service</th><th class="right">Count</th><th>Share</th><th class="right">P95</th><th class="right">Last seen</th></tr></thead><tbody>` +
+      failing.slice(0, 12).map(p => {
+        const sev = (p.severity || "").toUpperCase();
+        return `<tr class="clickable" data-q="${esc((p.errorCodes || [])[0] || p.topEvent || "")}" data-svc="${esc((p.services || [])[0] || "")}">
+          <td class="pat-cell"><div class="mono pat-name">${esc(p.pattern)}</div><div class="mono faint pat-sub">${esc(p.topEvent || "")}</div></td>
+          <td><span class="sev-tag" style="--c:var(${sevVar(sev)})"><span class="dot"></span>${esc(sev)}</span></td>
+          <td class="mono">${esc((p.services || []).map(svcShort).join(", "))}</td>
+          <td class="num pat-count">${nf(p.count)}</td>
+          <td><div class="share"><span class="share-bar"><i style="width:${Math.max(3, (p.sharePct || 0) / max * 100).toFixed(1)}%;background:var(${sev === "ERROR" || sev === "CRITICAL" ? "--err" : "--accent"})"></i></span><span class="faint">${nf(p.sharePct, 1)}%</span></div></td>
+          <td class="num">${p.p95LatencyMs == null ? "—" : nf(p.p95LatencyMs) + "ms"}</td>
+          <td class="num faint">${ago(p.lastSeen)}</td></tr>`;
+      }).join("") + `</tbody>`;
+  $$("#failPatTable [data-q]").forEach(tr => tr.addEventListener("click", () =>
     go("logs", { q: tr.dataset.q, service: tr.dataset.svc, severity: "" })));
 }
 
@@ -1239,38 +1315,67 @@ async function loadPerformance() {
 
 /* ---------- services ---------- */
 async function loadServices() {
-  const s = await api(`/api/v1/services?window=${state.window}`);
-  if (!s.services.length) {
-    $("#serviceCards").innerHTML = `<div class="empty">No services reporting yet.</div>`;
-    return;
-  }
-  $("#serviceCards").innerHTML = s.services.map(x => {
-    const bad = x.errorRate5xx > 0.05, warn = x.errorRate5xx > 0.01 || (x.p95LatencyMs || 0) > 2000;
-    const mem = x.memoryUtilisationPct || 0;
-    return `<div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-        <div>
-          <strong style="font-size:15px">${esc(x.service.replace("cognikart-", ""))}</strong>
-          <div class="faint" style="font-size:11px">${esc(x.service)}</div>
-        </div>
-        <span class="pill ${bad ? "err" : warn ? "warn" : "ok"}"><span class="dot"></span>${bad ? "failing" : warn ? "degraded" : "healthy"}</span>
+  const [s, routes, errs] = await Promise.all([
+    api(`/api/v1/services?window=${state.window}`),
+    api(`/api/v1/routes?window=${state.window}&limit=200`).catch(() => null),
+    api(`/api/v1/errors?window=${state.window}&limit=100`).catch(() => ({ groups: [] })),
+  ]);
+  const list = s.services || [];
+  const grade = x => gradeOf({ errorRate: x.errorRate5xx || 0, p95LatencyMs: x.p95LatencyMs });
+  const order = { err: 0, warn: 1, ok: 2 };
+  list.sort((a, b) => order[grade(a).cls] - order[grade(b).cls] || b.requests - a.requests);
+  const attention = list.filter(x => grade(x).cls !== "ok");
+  const totReq = list.reduce((a, x) => a + (x.requests || 0), 0);
+  const totErr = list.reduce((a, x) => a + (x.errors5xx || 0) + (x.errors4xx || 0), 0);
+
+  $("#svcTiles").innerHTML = [
+    linkTile({ label: "Services", value: nf(list.length), foot: "emitting telemetry in this window", href: "#services" }),
+    linkTile({ label: "Needing attention", value: nf(attention.length), valueColor: attention.length ? "--warn" : "--ok",
+               foot: attention.length ? attention.map(x => svcShort(x.service)).join(", ") : "all healthy", href: "#services" }),
+    linkTile({ label: "Total requests", value: nf(totReq), foot: `${nf(totReq / state.window, 1)}/min`, href: "#logs" }),
+    linkTile({ label: "Total errors", value: nf(totErr), valueColor: totErr ? "--err" : null, foot: "5xx and 4xx", href: "#logs?severity=WARNING" }),
+  ].join("");
+
+  if (!list.length) { $("#serviceCards").innerHTML = `<div class="empty">No services reporting yet.</div>`; return; }
+  const byService = {};
+  ((routes && routes.routes) || []).forEach(r => (byService[r.service] = byService[r.service] || []).push(r.route));
+  const fig = (label, value, color) =>
+    `<div class="svc-fig"><div class="svc-fig-k">${label}</div><div class="svc-fig-v"${color ? ` style="color:var(${color})"` : ""}>${value}</div></div>`;
+
+  $("#serviceCards").innerHTML = list.map((x, i) => {
+    const g = grade(x);
+    const top = (errs.groups || []).filter(e => e.service === x.service).sort((a, b) => b.count - a.count)[0];
+    const avail = x.requests ? 100 - (x.errorRate5xx || 0) * 100 : null;
+    const rts = (byService[x.service] || []).sort();
+    const dot = `var(--s${(i % 4) + 1})`;
+    return `<div class="card svc-card">
+      <div class="svc-head">
+        <span class="svc-dot" style="background:${dot}"></span>
+        <div class="svc-title"><div class="mono svc-name2">${esc(svcShort(x.service))}</div>
+          <div class="faint">${nf(rts.length)} route${rts.length === 1 ? "" : "s"} · ${nf(x.requestsPerMin, 1)}/min</div></div>
+        <span class="pill ${g.cls}"><span class="dot"></span>${g.word}</span>
+        <span class="svc-actions">
+          <a class="btn" href="${buildHash("logs", { service: x.service })}">View logs →</a>
+          ${x.errors5xx ? `<a class="btn danger" href="${buildHash("logs", { service: x.service, severity: "ERROR" })}">View errors →</a>` : ""}
+        </span>
       </div>
-      <dl class="kv" style="margin-top:12px">
-        <dt>Requests</dt><dd>${nf(x.requests)} <span class="faint">(${nf(x.requestsPerMin, 1)}/min)</span></dd>
-        <dt>Server errors</dt><dd style="color:${x.errors5xx ? "var(--err)" : "inherit"}">${nf(x.errors5xx)} <span class="faint">(${pct(x.errorRate5xx * 100, 2)})</span></dd>
-        <dt>Client errors</dt><dd>${nf(x.errors4xx)}</dd>
-        <dt>Latency p50 / p95</dt><dd>${x.p50LatencyMs === null ? "—" : nf(x.p50LatencyMs) + "ms"} / ${x.p95LatencyMs === null ? "—" : nf(x.p95LatencyMs) + "ms"}</dd>
-        <dt>CPU peak</dt><dd>${x.cpuPctMax === null ? "—" : pct(x.cpuPctMax)}</dd>
-        <dt>Memory</dt><dd>${nf(x.rssMbMax)} / ${nf(x.memoryGibProvisioned * 1024)} MiB <span class="faint">(${pct(mem)})</span></dd>
-        <dt>Instances</dt><dd>${nf(x.instanceCount)}</dd>
-        <dt>Log volume</dt><dd>${nf(x.logBytes / 1048576, 2)} MiB</dd>
-      </dl>
-      ${mem && mem < 40 ? `<div class="faint" style="font-size:11.5px;margin-top:8px;color:var(--money)">Over-provisioned: using ${pct(mem)} of what it reserves.</div>` : ""}
-      <button class="btn" style="margin-top:11px;width:100%" data-svclogs="${esc(x.service)}">Open its logs</button>
+      <div class="svc-figs">
+        ${fig("Requests", nf(x.requests))}
+        ${fig("Error rate", pct((x.errorRate5xx || 0) * 100, 1), x.errorRate5xx > 0.01 ? "--err" : null)}
+        ${fig("Availability", avail == null ? "—" : pct(avail, 2), avail != null && avail < 99 ? "--err" : null)}
+        ${fig("CPU", x.cpuPctMax == null ? "—" : pct(x.cpuPctMax, 0), x.cpuPctMax > 80 ? "--err" : x.cpuPctMax > 60 ? "--warn" : null)}
+        ${fig("P50", x.p50LatencyMs == null ? "—" : nf(x.p50LatencyMs) + "ms")}
+        ${fig("P95", x.p95LatencyMs == null ? "—" : nf(x.p95LatencyMs) + "ms", x.p95LatencyMs > 500 ? "--warn" : null)}
+        ${fig("P99", x.p99LatencyMs == null ? "—" : nf(x.p99LatencyMs) + "ms")}
+      </div>
+      <div class="svc-foot">
+        <span><span class="faint">5xx</span> <b>${nf(x.errors5xx)}</b></span>
+        <span><span class="faint">4xx</span> <b>${nf(x.errors4xx)}</b></span>
+        ${top ? `<a class="mono faint svc-top" href="${buildHash("logs", { q: top.errorCode, service: x.service })}">top failure: ${esc(top.errorCode)} ×${nf(top.count)} →</a>` : ""}
+      </div>
+      ${rts.length ? `<div class="svc-routes"><div class="svc-fig-k">Routes</div>${rts.map(r => `<a class="route-chip mono" href="${buildHash("logs", { service: x.service, route: r })}">${esc(r)}</a>`).join("")}</div>` : ""}
     </div>`;
   }).join("");
-  $$("#serviceCards [data-svclogs]").forEach(b => b.addEventListener("click", () =>
-    go("logs", { service: b.dataset.svclogs, severity: "" })));
 }
 
 /* ---------- setup ---------- */
@@ -1307,12 +1412,32 @@ async function loadSetup() {
       <span class="pill ${on ? "ok" : "muted"}"><span class="dot"></span>${esc(state)}</span>
     </div>`).join("");
 
-  const watched = c.watchedServices || [];
-  $("#setupAppTitle").textContent = `${m.observes || "Application"} services`;
-  $("#setupApp").innerHTML = watched.length
-    ? watched.map(n => `<a class="card setup-app" href="${buildHash("resources", { service: n })}">
-        <span class="mono">${esc(svcShort(n))}</span><span class="faint mono">${esc(n)}</span></a>`).join("")
-    : `<div class="empty">No services configured.</div>`;
+  const platforms = [
+    ["cloud", "accent", "Google Cloud", gcp ? "Connected" : "Local mode", gcp ? "ok" : "info"],
+    ["cloud", "info", "Microsoft Azure", "Coming soon", "muted"],
+    ["cloud", "warn", "Amazon Web Services", "Coming soon", "muted"],
+  ];
+  $("#setupPlatforms").innerHTML = platforms.map(([icon, tint, name, state, cls]) => `
+    <div class="card setup-svc${cls === "muted" ? " is-off" : ""}">${ico(icon, tint)}
+      <div class="setup-svc-text"><div class="setup-svc-name">${name}</div></div>
+      <span class="pill ${cls}"><span class="dot"></span>${state}</span></div>`).join("");
+
+  // Google Cloud services OpsMind can use but this deployment does not yet.
+  const available = [
+    ["scroll", "info", "Cloud Trace", "Request traces across services"],
+    ["alert", "err", "Error Reporting", "Grouped exceptions with stack traces"],
+    ["coins", "money", "BigQuery billing export", "Billed cost, not modeled"],
+    ["bolt", "warn", "Pub/Sub", "Alert delivery to chat and paging"],
+    ["layers", "ok", "Cloud SQL", "Database CPU, connections, slow queries"],
+    ["nodes", "accent", "Cloud Load Balancing", "Edge latency and status codes"],
+  ];
+  $("#setupAvailable").innerHTML = available.map(([icon, tint, name, what]) => `
+    <div class="card setup-svc is-off">${ico(icon, tint)}
+      <div class="setup-svc-text"><div class="setup-svc-name">${name}</div><div class="faint">${what}</div></div>
+      <span class="pill muted">Available</span></div>`).join("");
+  const used = svc.filter(x => x[4]).length;
+  $("#svcUsedChip").innerHTML = chip(`${used} of ${svc.length} active`, "--ok");
+  $("#svcAvailChip").innerHTML = chip(`${available.length} not connected`, "--text-faint");
 }
 
 /* ---------- cost ---------- */
@@ -1726,8 +1851,8 @@ async function refresh() {
     await loadMeta();
     if (!$("#logSvc").options.length || $("#logSvc").options.length === 1) {
       const s = await api("/api/v1/services?window=60");
-      $("#logSvc").innerHTML = `<option value="">all services</option>` +
-        s.services.map(x => `<option value="${esc(x.service)}">${esc(x.service)}</option>`).join("");
+      $("#logSvc").innerHTML = `<option value="">All</option>` +
+        s.services.map(x => `<option value="${esc(x.service)}">${esc(svcShort(x.service))}</option>`).join("");
     }
     if (state.view === "overview") await loadOverview();
     else if (state.view === "logs") { await loadLogsInitial(); await loadErrors(); }

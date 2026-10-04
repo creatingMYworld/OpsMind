@@ -141,31 +141,31 @@
 
     <!-- LOGS -->
     <section class="view" id="view-logs">
-      <h2>Logs <span class="tier live">live · 1–5 s</span></h2>
-      <div class="lede">Centralised, structured logs from all four CogniKart services. Click any row for the full entry and its trace across services.</div>
-      <div class="logbar">
-        <select id="logSev"><option value="">all severities</option><option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select>
-        <select id="logSvc"><option value="">all services</option></select>
-        <input type="text" id="logQ" placeholder="search message, event, error code…" style="min-width:260px">
-        <button class="btn" id="logPause">⏸ Pause</button>
-        <button class="btn" id="logClear">Clear</button>
-        <span class="faint mono" id="logCount" style="margin-left:auto"></span>
+      <h2>Logs</h2>
+      <div class="lede">Search and filter every log entry.</div>
+      <div class="card filterbar">
+        <input type="text" id="logQ" class="fsearch" placeholder="Search logs   /">
+        <label class="fsel"><span class="fsel-k">Severity</span><select id="logSev"><option value="">All</option><option>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+        <label class="fsel"><span class="fsel-k">Service</span><select id="logSvc"><option value="">All</option></select><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+        <label class="fsel"><span class="fsel-k">Status</span><select id="logStatus"><option value="">All</option><option value="2">2xx</option><option value="4">4xx</option><option value="5">5xx</option></select><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+        <label class="fsel"><span class="fsel-k">Route</span><select id="logRoute"><option value="">All</option></select><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+        <label class="fsel"><span class="fsel-k">Event</span><select id="logEvent"><option value="">All</option></select><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></label>
+        <span class="fcount" id="logCount"></span>
+        <button class="tb-btn tb-icon" id="logPause" title="Pause live stream" aria-label="Pause live stream"></button>
       </div>
-      <div class="card" style="padding:10px 12px;margin-bottom:12px">
-        <div class="hint" style="margin:0 0 6px">Log ingestion volume (MiB/min) — the fastest-moving cost driver in this architecture</div>
-        <div class="chart-wrap xs"><canvas id="chLogVol"></canvas></div>
+      <div class="card chart-card" style="margin-top:12px">
+        <div class="card-row"><h3>Matching volume</h3><div class="legend-inline" id="logVolLegend"></div></div>
+        <div class="chart-wrap sm"><canvas id="chLogVol"></canvas></div>
       </div>
-      <div class="logtable"><table><tbody id="logBody"></tbody></table></div>
-          <h2 class="sub-head" id="errors">Errors</h2>
-      <div class="grid g3" id="errTiles"></div>
-      <div class="grid g2" style="margin-top:14px">
-        <div class="card"><h3>Errors over time</h3><div class="hint">5xx are server faults; 4xx are client mistakes. The platform never conflates them.</div><div class="chart-wrap"><canvas id="chErrors"></canvas></div></div>
-        <div class="card"><h3>Server vs client</h3><div class="hint">A bad product id is not a service failure.</div><div class="chart-wrap"><canvas id="chErrSplit"></canvas></div></div>
+      <div id="errBlock" hidden>
+        <div class="sec-head"><div><div class="eyebrow-label">Errors</div><h2 class="sec-title" id="errors">Error details</h2></div><span id="errChip"></span></div>
+        <div class="grid g4" id="errTiles"></div>
+        <div class="card flush" style="margin-top:12px"><div style="overflow-x:auto"><table class="pat-table" id="errTable"></table></div></div>
+        <div class="sec-head"><div><div class="eyebrow-label">Errors</div><h2 class="sec-title">Matching error logs</h2></div></div>
       </div>
-      <div class="card" style="margin-top:14px">
-        <h3>Error groups</h3><div class="hint">Click a group to see samples and jump to its logs.</div>
-        <div style="overflow-x:auto"><table id="errTable"></table></div>
-      </div>
+      <div class="card flush logcard" style="margin-top:12px"><div style="overflow-x:auto"><table class="pat-table logtable2">
+        <thead><tr><th>Time</th><th>Severity</th><th>Event</th><th>Service</th><th>Route</th><th class="right">Status</th><th class="right">Latency</th></tr></thead>
+        <tbody id="logBody"></tbody></table></div></div>
     </section>
 
     <!-- ERRORS -->
@@ -232,20 +232,14 @@
     <!-- INSIGHTS -->
     <section class="view" id="view-insights">
       <h2>Insights</h2>
-      <div class="lede">Repeating log patterns and statistical anomalies.</div>
+      <div class="lede">Anomalies, breached thresholds, their likely causes and what to do.</div>
       <div class="grid g4" id="insTiles"></div>
-      <div class="card ins-card">
-        <div class="card-row"><h3 id="anomTitle">Anomalies</h3><span class="faint ins-note" id="anomNote"></span></div>
-        <div id="anomalyList"></div>
-      </div>
-      <div class="card flush ins-card">
-        <div class="card-row pad"><h3>Failure patterns</h3><span class="faint ins-note">warnings and errors</span></div>
-        <div style="overflow-x:auto"><table class="pat-table" id="failPatTable"></table></div>
-      </div>
-      <div class="card flush ins-card">
-        <div class="card-row pad"><h3>All patterns, including routine traffic</h3><span class="faint ins-note" id="patNote"></span></div>
-        <div style="overflow-x:auto"><table class="pat-table" id="patternTable"></table></div>
-      </div>
+      <div class="sec-head"><div><div class="eyebrow-label">Statistical</div><h2 class="sec-title" id="anomTitle">Anomalies</h2></div><span id="anomChip"></span></div>
+      <div id="anomalyList"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Thresholds</div><h2 class="sec-title">Incidents</h2></div><span id="incChip"></span></div>
+      <div class="card flush"><div style="overflow-x:auto"><table class="pat-table find-table" id="findTable"></table></div></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Patterns</div><h2 class="sec-title">Failure patterns</h2></div><span class="faint ins-note" id="patNote"></span></div>
+      <div class="card flush"><div style="overflow-x:auto"><table class="pat-table" id="failPatTable"></table></div></div>
     </section>
 
     <!-- PERFORMANCE -->
@@ -270,8 +264,9 @@
     <!-- SERVICES -->
     <section class="view" id="view-services">
       <h2>Services</h2>
-      <div class="lede">Health broken down per workload. Click any service to inspect its logs.</div>
-      <div class="grid g2" id="serviceCards"></div>
+      <div class="lede">Health broken down per workload.</div>
+      <div class="grid g4" id="svcTiles"></div>
+      <div id="serviceCards"></div>
     </section>
 
     <!-- SETUP -->
@@ -285,11 +280,14 @@
       <div id="projError"></div>
       <div class="grid g3" id="projGrid"></div>
 
-      <div class="sec-head"><div><div class="eyebrow-label">Google Cloud</div><h2 class="sec-title">Services we use</h2></div></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Platforms</div><h2 class="sec-title">Cloud platforms</h2></div></div>
+      <div class="grid g3" id="setupPlatforms"></div>
+
+      <div class="sec-head"><div><div class="eyebrow-label">Google Cloud</div><h2 class="sec-title">In use</h2></div><span id="svcUsedChip"></span></div>
       <div class="grid g3" id="setupServices"></div>
 
-      <div class="sec-head"><div><div class="eyebrow-label">Application</div><h2 class="sec-title" id="setupAppTitle">Monitored services</h2></div></div>
-      <div class="grid g4" id="setupApp"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Google Cloud</div><h2 class="sec-title">Available to connect</h2></div><span id="svcAvailChip"></span></div>
+      <div class="grid g3" id="setupAvailable"></div>
     </section>
 
     <!-- INCIDENTS -->

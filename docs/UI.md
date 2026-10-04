@@ -48,6 +48,31 @@ chosen.
 7. Failures and slow paths: ranked bars.
 8. Top cost-saving actions as a two-line summary.
 
+## Other pages
+
+- **Services**: summary tiles (services, needing attention, total requests,
+  total errors), then one card per service, worst first: grade, View logs /
+  View errors, Requests, Error rate, Availability, CPU, P50, P95, P99, 5xx and
+  4xx counts, top failure, route chips. OpsMind has no Apdex, so CPU takes
+  that slot.
+- **Logs**: one filter row (Search, Severity, Service, Status, Route, Event,
+  match count, pause), a matching-volume chart, then the table. Severity,
+  service, event and search are filtered by the API; status and route on the
+  client. Choosing ERROR/CRITICAL or 5xx shows **Error details** (tiles and
+  error groups for the selected service) above the matching error logs. Rows
+  are newest first; clicking one opens the entry and its trace.
+- **Insights**: anomalies (each with a likely cause: the most frequent error
+  on that service), incidents as a table of likely cause, impact and
+  recommended action, then failure patterns. Impact and action come from the
+  open actions; a resolved incident with no open action shows a dash.
+- **Incidents**: tiles, then Breaching and Resolved. The "High or critical"
+  tile counts both severities, as the API does.
+- **Performance**: p50/p95/p99 tiles, percentile chart, throughput against
+  failures, every route.
+- **Setup**: connection tiles, project tiles, cloud platforms (Azure and AWS
+  coming soon), Google Cloud services **in use** and **available to
+  connect**.
+
 ## Visual system
 
 - Neutral near-black theme shared with the landing page; light theme

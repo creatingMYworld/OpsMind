@@ -732,3 +732,70 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
 
 .inc-list > .empty { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); }
 .inc-list > .inc-row { margin-top: 0; margin-bottom: 10px; }
+
+
+/* ---------- filter bar ---------- */
+.filterbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; }
+.fsearch {
+  height: 34px; width: 180px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: 13px var(--sans);
+}
+.fsearch:focus { outline: none; border-color: var(--accent); }
+.fsel {
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elev2); cursor: pointer;
+}
+.fsel:focus-within { border-color: var(--accent); }
+.fsel-k { color: var(--text-faint); font-size: 12.5px; }
+.fsel select {
+  appearance: none; -webkit-appearance: none; border: 0; background: none; padding: 0;
+  color: var(--text); font: 600 12.5px var(--sans); cursor: pointer; max-width: 104px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.fsel select:focus { outline: none; }
+.fsel select option { background: var(--bg-elev2); }
+.fsel svg { color: var(--text-faint); }
+.fcount { margin-left: auto; font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.fcount b { color: var(--text); }
+.logtable2 td { padding: 9px 16px; }
+.logtable2 td.mono { font-size: 12px; }
+#errBlock .sec-head:first-child { margin-top: 20px; }
+
+/* ---------- services ---------- */
+#serviceCards { display: grid; gap: 12px; margin-top: 12px; }
+.svc-card { padding: 18px 20px; }
+.svc-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.svc-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.svc-title { min-width: 0; }
+.svc-name2 { font-size: 15px; font-weight: 600; }
+.svc-title .faint { font-size: 12px; }
+.svc-actions { margin-left: auto; display: flex; gap: 8px; }
+.svc-actions .btn { font-size: 12.5px; padding: 6px 12px; }
+.svc-figs { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; margin: 18px 0 14px; }
+.svc-fig-k { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+.svc-fig-v { font-size: 17px; font-weight: 650; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.svc-foot { display: flex; align-items: center; gap: 18px; padding-top: 12px; border-top: 1px solid var(--border-soft); font-size: 13px; }
+.svc-foot b { font-variant-numeric: tabular-nums; }
+.svc-top { margin-left: auto; font-size: 12px; }
+.svc-top:hover { color: var(--text); }
+.svc-routes { margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.svc-routes .svc-fig-k { width: 100%; }
+.route-chip { padding: 4px 9px; border-radius: 6px; background: var(--bg-elev2); border: 1px solid var(--border-soft); font-size: 12px; color: var(--text); }
+.route-chip:hover { border-color: var(--accent); }
+@media (max-width: 1100px) { .svc-figs { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* ---------- setup available ---------- */
+.setup-svc.is-off { opacity: .78; }
+.setup-svc.is-off:hover { opacity: 1; }
+
+/* ---------- insights findings ---------- */
+#anomalyList .anom-row:first-child { margin-top: 0; }
+.find-table td { vertical-align: top; }
+.find-title { font-weight: 600; font-size: 13.5px; }
+.find-action { max-width: 360px; font-size: 12.5px; line-height: 1.5; }
+/* One row at 1440px: search takes what is left; long route/event values truncate. */
+.filterbar { flex-wrap: nowrap; }
+.filterbar .fsearch { flex: 1 1 140px; min-width: 120px; width: auto; }
+.filterbar .fsel { flex: none; }
+#logRoute, #logEvent { max-width: 84px; }
+@media (max-width: 1200px) { .filterbar { flex-wrap: wrap; } }
