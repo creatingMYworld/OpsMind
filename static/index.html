@@ -75,11 +75,34 @@
 
       <div class="eyebrow-label">Key numbers</div>
       <div class="grid g4" id="heroTiles"></div>
+
+      <div class="sec-head">
+        <div><div class="eyebrow-label">Reliability</div><h2 class="sec-title">What is failing</h2></div>
+        <span id="failChip"></span>
+      </div>
+      <div class="grid g4" id="failTiles"></div>
+      <div class="grid split-21" style="margin-top:14px">
+        <div class="card">
+          <div class="card-row">
+            <h3>Volume over time, by severity</h3>
+            <div class="legend-inline" id="sevLegend"></div>
+          </div>
+          <div class="chart-wrap"><canvas id="chSeverity"></canvas></div>
+        </div>
+        <div class="card"><h3>Severity split</h3><div id="sevSplit"></div></div>
+      </div>
+
+      <div class="sec-head">
+        <div><div class="eyebrow-label">Breakdown</div><h2 class="sec-title">Health by service</h2></div>
+        <span class="sec-right"><span id="svcChip"></span><a class="sec-link" href="#services">All services →</a></span>
+      </div>
+      <div class="card flush"><div style="overflow-x:auto"><table id="svcTable" class="svc-table"></table></div></div>
+
       <div class="grid g2" style="margin-top:14px">
         <div class="card">
-          <h3 data-icon="bars" data-tint="info">Traffic &amp; errors <span class="tier live">live</span></h3>
-          <div class="hint">Requests by outcome per minute, with p95 latency overlaid.</div>
-          <div class="chart-wrap"><canvas id="chTraffic"></canvas></div>
+          <h3 data-icon="funnel" data-tint="accent">Checkout funnel</h3>
+          <div class="hint">Derived from the log stream: the business view of the same data.</div>
+          <div id="funnelBox"></div>
         </div>
         <div class="card">
           <h3 data-icon="coins" data-tint="money">Modeled cloud spend <span class="tier live">live · modeled</span></h3>
@@ -87,18 +110,15 @@
           <div class="chart-wrap"><canvas id="chCost"></canvas></div>
         </div>
       </div>
-      <div class="grid g2" style="margin-top:14px">
-        <div class="card">
-          <h3 data-icon="nodes" data-tint="ok">Service health</h3>
-          <div class="hint">Click a service to inspect its resources.</div>
-          <div style="overflow-x:auto"><table id="svcTable"></table></div>
-        </div>
-        <div class="card">
-          <h3 data-icon="funnel" data-tint="accent">Checkout funnel</h3>
-          <div class="hint">Derived from the log stream — the business view of the same data.</div>
-          <div id="funnelBox"></div>
-        </div>
+
+      <div class="sec-head">
+        <div><div class="eyebrow-label">Detail</div><h2 class="sec-title">Failures and slow paths</h2></div>
       </div>
+      <div class="grid g2">
+        <div class="card"><h3>Most frequent failures</h3><div id="topFailures" class="ranked"></div></div>
+        <div class="card"><h3>Slowest endpoints</h3><div id="slowRoutes" class="ranked"></div></div>
+      </div>
+
       <div class="grid g2" style="margin-top:14px">
         <div class="card"><h3 data-icon="alert" data-tint="err">Active incidents</h3><div id="ovIncidents"></div></div>
         <div class="card"><h3 data-icon="tag" data-tint="cost">Top cost-saving actions</h3><div id="ovRecs"></div></div>

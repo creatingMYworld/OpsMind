@@ -392,6 +392,15 @@ def errors(window: int = Query(60, ge=1, le=180),
     }
 
 
+@app.get("/api/v1/routes")
+def routes(window: int = Query(60, ge=1, le=180),
+           slow_ms: int = Query(500, ge=50, le=10000)) -> Dict[str, Any]:
+    """Slowest endpoints and the slow-request count, from individual requests."""
+    data = store.route_stats(window_minutes=window, slow_ms=slow_ms)
+    data["windowMinutes"] = window
+    return data
+
+
 @app.get("/api/v1/services")
 def services(window: int = Query(15, ge=1, le=180)) -> Dict[str, Any]:
     return {"windowMinutes": window,

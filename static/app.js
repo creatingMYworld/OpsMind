@@ -254,6 +254,164 @@ function renderKeyNumbers({ t, c, o, points, costSeries, incs }) {
   ].join("");
 }
 
+/* ---------- overview: what is failing ---------- */
+const svcShort = n => String(n || "").replace(/^cognikart-/, "");
+function chip(text, tone) {
+  return `<span class="sec-chip" style="--chip:var(${tone})"><span class="dot"></span>${esc(text)}</span>`;
+}
+function linkTile({ label, value, valueColor, foot, href }) {
+  return `<a class="card ktile" href="${href}">
+    <div class="ktile-label">${esc(label)}<span class="ktile-go" aria-hidden="true">→</span></div>
+    <div class="ktile-row"><div class="ktile-value"${valueColor ? ` style="color:var(${valueColor})"` : ""}>${value}</div></div>
+    <div class="ktile-foot">${foot}</div></a>`;
+}
+function renderFailing({ t, points, routes, actions }) {
+  const cpu = points.map(p => p.cpuPctMax).filter(v => v != null);
+  const inst = points.map(p => p.instanceCount).filter(v => v != null);
+  const cpuNow = cpu.length ? Math.max(...cpu.slice(-5)) : null;
+  $("#failTiles").innerHTML = [
+    linkTile({ label: "Server errors (5xx)", value: nf(t.errors5xx), valueColor: t.errors5xx ? "--err" : null,
+               foot: `${pct(t.errorRatePct, 2)} of traffic · our fault`, href: "#logs?severity=ERROR" }),
+    linkTile({ label: "Client errors (4xx)", value: nf(t.errors4xx), valueColor: t.errors4xx ? "--warn" : null,
+               foot: `${pct(t.clientErrorRatePct, 2)} of traffic · caller side`, href: "#logs?severity=WARNING" }),
+    linkTile({ label: "Slow requests", value: routes ? nf(routes.slowRequests) : "—",
+               foot: routes ? `took longer than ${nf(routes.slowThresholdMs)}ms` : "route data unavailable", href: "#services" }),
+    linkTile({ label: "Infrastructure", value: cpuNow == null ? "—" : `${nf(cpuNow, 0)}% CPU`,
+               valueColor: cpuNow > 80 ? "--err" : cpuNow > 60 ? "--warn" : null,
+               foot: inst.length ? `${nf(Math.max(...inst))} instance(s) · peak, last 5 min` : "no heartbeats yet", href: "#resources" }),
+  ].join("");
+
+  const firing = (actions && actions.actions) || [];
+  $("#failChip").innerHTML = firing.length
+    ? chip(firing.length > 1 ? `${firing[0].title}, and ${firing.length - 1} more need attention` : `${firing[0].title} needs attention`,
+           firing[0].severity === "CRITICAL" || firing[0].severity === "HIGH" ? "--err" : "--warn")
+    : chip("Nothing needs attention", "--ok");
+}
+
+const SEV_GROUPS = [
+  { key: "INFO", label: "INFO", color: "--text-faint", from: ["DEBUG", "INFO", "DEFAULT", "NOTICE"] },
+  { key: "WARNING", label: "WARNING", color: "--warn", from: ["WARNING"] },
+  { key: "ERROR", label: "ERROR", color: "--err", from: ["ERROR", "CRITICAL", "ALERT", "EMERGENCY"] },
+];
+function sevOf(p, g) { return g.from.reduce((s, k) => s + ((p.severity || {})[k] || 0), 0); }
+
+function renderSeverity(points) {
+  const labels = points.map(p => hhmm(p.ts));
+  upsert("severity", "chSeverity", "bar", {
+    labels,
+    datasets: SEV_GROUPS.map(g => ({
+      label: g.label, data: points.map(p => sevOf(p, g)),
+      backgroundColor: css(g.color), stack: "s", borderRadius: 1, barPercentage: .78, categoryPercentage: .9,
+    })),
+  }, {
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { stacked: true, grid: { display: false }, ticks: { color: css("--text-faint"), font: { size: 10 }, maxRotation: 0, autoSkipPadding: 24 } },
+      y: { stacked: true, grid: { color: css("--border-soft") }, ticks: { color: css("--text-faint"), font: { size: 10 } }, beginAtZero: true },
+    },
+  });
+  $("#sevLegend").innerHTML = SEV_GROUPS.map(g =>
+    `<span><i style="background:var(${g.color})"></i>${g.label}</span>`).join("");
+
+  const totals = SEV_GROUPS.map(g => ({ ...g, n: points.reduce((s, p) => s + sevOf(p, g), 0) }));
+  const all = totals.reduce((s, x) => s + x.n, 0) || 1;
+  const req = points.reduce((s, p) => s + (p.requests || 0), 0);
+  const e5 = points.reduce((s, p) => s + (p.errors5xx || 0), 0);
+  const e4 = points.reduce((s, p) => s + (p.errors4xx || 0), 0);
+  $("#sevSplit").innerHTML = totals.map(x => `
+    <a class="sev-row" href="#logs?severity=${x.key === "INFO" ? "INFO" : x.key}">
+      <div class="sev-top"><span class="sev-tag" style="--c:var(${x.color})"><span class="dot"></span>${x.label}</span>
+        <span class="sev-n">${nf(x.n)}</span></div>
+      <div class="sev-bar"><span style="width:${(x.n / all * 100).toFixed(1)}%;background:var(${x.color})"></span></div>
+      <div class="sev-pct">${pct(x.n / all * 100, 1)} of all entries</div>
+    </a>`).join("") + `
+    <div class="sev-family">
+      <div class="sev-family-h">By HTTP status family</div>
+      <div><span><b>2xx</b> Success</span><span>${nf(Math.max(0, req - e5 - e4))}</span></div>
+      <div><span><b>4xx</b> Client error</span><span>${nf(e4)}</span></div>
+      <div><span><b>5xx</b> Server error</span><span>${nf(e5)}</span></div>
+    </div>`;
+}
+
+/* ---------- overview: health by service ---------- */
+function gradeOf(s) {
+  if (s.errorRate > 0.05) return { word: "CRITICAL", cls: "err" };
+  if (s.errorRate > 0.01 || (s.p95LatencyMs || 0) > 2000) return { word: "DEGRADED", cls: "warn" };
+  return { word: "HEALTHY", cls: "ok" };
+}
+function renderServiceHealth(svcs, groups, series) {
+  const tbl = $("#svcTable");
+  if (!svcs.length) {
+    tbl.innerHTML = `<tbody><tr><td class="empty">No services reporting yet.</td></tr></tbody>`;
+    $("#svcChip").innerHTML = "";
+    return;
+  }
+  const rows = svcs.map((s, i) => {
+    const pts = series[i] || [];
+    const requests = pts.reduce((a, p) => a + (p.requests || 0), 0);
+    const top = groups.filter(g => g.service === s.service).sort((a, b) => b.count - a.count)[0];
+    return { s, g: gradeOf(s), requests, pts, top };
+  });
+  const order = { err: 0, warn: 1, ok: 2 };
+  rows.sort((a, b) => order[a.g.cls] - order[b.g.cls] || b.requests - a.requests);
+
+  tbl.innerHTML = `<thead><tr><th>Service</th><th>Grade</th><th class="right">Requests</th>
+    <th class="right">Error rate</th><th class="right">P95</th><th>Trend</th><th>Top failure</th></tr></thead><tbody>` +
+    rows.map(({ s, g, requests, pts, top }) => {
+      const tone = g.cls === "err" ? "--err" : "--accent";
+      return `<tr class="clickable" data-svc="${esc(s.service)}">
+        <td class="mono svc-name">${esc(svcShort(s.service))}</td>
+        <td><span class="pill ${g.cls}"><span class="dot"></span>${g.word}</span></td>
+        <td class="num">${nf(requests)}</td>
+        <td class="num" style="color:${s.errorRate > 0.01 ? "var(--err)" : "inherit"}">${pct(s.errorRate * 100, 1)}</td>
+        <td class="num" style="color:${(s.p95LatencyMs || 0) > 500 ? "var(--warn)" : "inherit"}">${s.p95LatencyMs == null ? "—" : nf(s.p95LatencyMs) + "ms"}</td>
+        <td>${sparkline(pts.map(p => p.requests || 0), tone)}</td>
+        <td class="mono faint top-fail">${top ? `${esc(top.errorCode || top.pattern || "error")} ×${nf(top.count)}` : "—"}</td>
+      </tr>`;
+    }).join("") + `</tbody>`;
+  $$("#svcTable [data-svc]").forEach(tr => tr.addEventListener("click", () => go("resources", { service: tr.dataset.svc })));
+
+  const worst = rows[0];
+  $("#svcChip").innerHTML = worst.g.cls === "ok"
+    ? chip("All services healthy", "--ok")
+    : chip(`${svcShort(worst.s.service)} is ${worst.g.word.toLowerCase()}`, worst.g.cls === "err" ? "--err" : "--warn");
+}
+
+/* ---------- overview: failures and slow paths ---------- */
+function ranked(items, empty) {
+  if (!items.length) return `<div class="empty">${empty}</div>`;
+  const max = Math.max(...items.map(x => x.value), 1);
+  return items.map(x => `
+    <a class="rank-row" href="${x.href}">
+      <div class="rank-top"><span class="mono rank-label">${esc(x.label)}</span><span class="rank-val">${x.display}</span></div>
+      <div class="rank-bar"><span style="width:${Math.max(2, x.value / max * 100).toFixed(1)}%;background:var(${x.color})"></span></div>
+    </a>`).join("");
+}
+function renderTopFailures(groups) {
+  const byLabel = new Map();
+  for (const g of groups) {
+    const label = g.errorCode || g.pattern || "error";
+    const cur = byLabel.get(label) || { label, value: 0, sev: g.severity, service: g.service };
+    cur.value += g.count;
+    byLabel.set(label, cur);
+  }
+  const items = [...byLabel.values()].sort((a, b) => b.value - a.value).slice(0, 6).map((x, i) => ({
+    ...x, display: nf(x.value),
+    color: i === 0 || x.sev === "ERROR" || x.sev === "CRITICAL" ? "--err" : "--warn",
+    href: buildHash("logs", { q: x.label }),
+  }));
+  $("#topFailures").innerHTML = ranked(items, "No failures in this window.");
+}
+function renderSlowRoutes(routes) {
+  const rows = (routes && routes.routes || []).filter(r => r.p95LatencyMs != null).slice(0, 6);
+  const items = rows.map(r => ({
+    label: r.route, value: r.p95LatencyMs, display: nf(r.p95LatencyMs) + "ms",
+    color: r.p95LatencyMs > 500 ? "--warn" : "--accent",
+    href: buildHash("logs", { q: r.route }),
+  }));
+  $("#slowRoutes").innerHTML = ranked(items, routes ? "No requests in this window." : "Route data unavailable.");
+}
+
 /* ---------- overview: status strip ----------
    Project identity on one row, then the five numbers that say whether it is
    healthy. Same shape in every cell: name, value, qualifier. */
@@ -314,7 +472,21 @@ async function loadOverview() {
   const points = complete(pts.points);
   const costSeries = complete(c.series || []);
   renderKeyNumbers({ t, c, o, points, costSeries, incs });
-  drawTraffic(points);
+
+  // Data for the lower sections. Failures, routes and per-service series are
+  // independent, so they load together; a failure in one leaves the others.
+  const svcNames = (o.services || []).map(s => s.service);
+  const [errs, routes, ...svcSeries] = await Promise.all([
+    api(`/api/v1/errors?window=${state.window}&limit=50`).catch(() => ({ groups: [] })),
+    api(`/api/v1/routes?window=${state.window}`).catch(() => null),
+    ...svcNames.map(n => api(`/api/v1/metrics/series?window=${state.window}&service=${encodeURIComponent(n)}`)
+                          .then(r => complete(r.points)).catch(() => [])),
+  ]);
+  renderFailing({ t, points, routes, actions: o.actions });
+  renderSeverity(points);
+  renderServiceHealth(o.services || [], errs.groups || [], svcSeries);
+  renderTopFailures(errs.groups || []);
+  renderSlowRoutes(routes);
   const cs = complete(c.series || []);
   upsert("cost", "chCost", "line", {
     labels: cs.map(p => hhmm(p.ts)),
@@ -326,7 +498,6 @@ async function loadOverview() {
     ],
   }, { scales: { y: { stacked: true, grid: { color: css("--border-soft") }, ticks: { color: css("--text-faint"), font: { size: 10 }, callback: v => "$" + Number(v).toFixed(3) } }, x: { stacked: true, grid: { color: css("--border-soft") }, ticks: { color: css("--text-faint"), font: { size: 10 }, autoSkipPadding: 18 } } } });
 
-  renderServiceTable(o.services);
   renderFunnel(f);
 
   $("#ovIncidents").innerHTML = o.incidents.openCount === 0

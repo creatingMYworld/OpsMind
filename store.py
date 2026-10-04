@@ -506,6 +506,44 @@ class Store:
         groups.sort(key=lambda g: (g.count, g.lastSeen), reverse=True)
         return [g.to_dict() for g in groups[:limit]]
 
+    def route_stats(self, window_minutes: int = 60, slow_ms: int = 500,
+                    limit: int = 10) -> Dict[str, Any]:
+        """Per-route latency and failures, from the raw log buffer.
+
+        Minute buckets keep only overall percentiles, so "which endpoint is
+        slow" has to come from individual requests. The buffer is bounded, so
+        at high volume this describes the most recent requests in the window,
+        and the response says how many it looked at.
+        """
+        cutoff = time.time() - window_minutes * 60
+        with self._lock:
+            pool = [r for r in self._logs
+                    if r.ts >= cutoff and r.event.startswith("http.request")
+                    and r.httpStatus is not None]
+        by_route: Dict[str, Dict[str, Any]] = {}
+        slow = 0
+        for r in pool:
+            key = r.route or "(unknown)"
+            row = by_route.setdefault(key, {"route": key, "service": r.service,
+                                            "count": 0, "errors5xx": 0, "lat": []})
+            row["count"] += 1
+            if r.is_server_error:
+                row["errors5xx"] += 1
+            if r.latencyMs is not None:
+                row["lat"].append(float(r.latencyMs))
+                if r.latencyMs > slow_ms:
+                    slow += 1
+        rows = []
+        for row in by_route.values():
+            lat = row.pop("lat")
+            row["p95LatencyMs"] = _r(percentile(lat, 95)) if lat else None
+            row["errorRate"] = round(row["errors5xx"] / float(row["count"]), 4)
+            rows.append(row)
+        rows.sort(key=lambda x: x["p95LatencyMs"] or 0, reverse=True)
+        return {"routes": rows[:limit], "routeCount": len(rows),
+                "slowRequests": slow, "slowThresholdMs": slow_ms,
+                "sampled": len(pool)}
+
     def heartbeats(self) -> List[Dict[str, Any]]:
         with self._lock:
             return [r.to_dict() for r in self._heartbeats.values()]
