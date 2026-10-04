@@ -41,6 +41,35 @@ async function api(path, opts) {
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 /* ---------- charts ---------- */
+/* Global Chart.js look. Recessive grid and axes, no x gridlines, theme fonts,
+   one tooltip style, rounded bar ends, 2px lines with no resting points. */
+function applyChartTheme() {
+  if (typeof Chart === "undefined") return;
+  const d = Chart.defaults;
+  d.font.family = css("--sans") || "system-ui";
+  d.font.size = 11;
+  d.color = css("--text-faint");
+  d.borderColor = css("--border-soft");
+  d.elements.line.borderWidth = 2;
+  d.elements.line.tension = .32;
+  d.elements.point.radius = 0;
+  d.elements.point.hoverRadius = 4;
+  d.elements.point.hoverBorderWidth = 2;
+  d.elements.bar.borderRadius = 3;
+  d.plugins.legend.labels.usePointStyle = true;
+  d.plugins.legend.labels.pointStyle = "rectRounded";
+  d.plugins.legend.labels.boxWidth = 8;
+  d.plugins.legend.labels.boxHeight = 8;
+  d.plugins.legend.labels.padding = 14;
+  d.plugins.legend.labels.color = css("--text-dim");
+  Object.assign(d.plugins.tooltip, {
+    backgroundColor: css("--bg-elev2"), borderColor: css("--border"), borderWidth: 1,
+    titleColor: css("--text"), bodyColor: css("--text-dim"), padding: 10, cornerRadius: 8,
+    boxPadding: 4, usePointStyle: true,
+    titleFont: { weight: "600", size: 12 }, bodyFont: { size: 12 },
+  });
+}
+
 function chartDefaults() {
   const grid = css("--border-soft"), tick = css("--text-faint");
   return {
@@ -52,8 +81,8 @@ function chartDefaults() {
                  titleColor: css("--text"), bodyColor: css("--text-dim"), padding: 9, displayColors: true },
     },
     scales: {
-      x: { grid: { color: grid, drawBorder: false }, ticks: { color: tick, font: { size: 10 }, maxRotation: 0, autoSkipPadding: 18 } },
-      y: { grid: { color: grid, drawBorder: false }, ticks: { color: tick, font: { size: 10 } }, beginAtZero: true },
+      x: { grid: { display: false }, border: { color: css("--border") }, ticks: { color: tick, font: { size: 10.5 }, maxRotation: 0, autoSkipPadding: 22 } },
+      y: { grid: { color: grid }, border: { display: false }, ticks: { color: tick, font: { size: 10.5 }, padding: 6, maxTicksLimit: 6 }, beginAtZero: true },
     },
   };
 }
@@ -151,7 +180,7 @@ function scheduleRefresh() {
 $("#themeBtn").addEventListener("click", () => {
   const root = document.documentElement;
   root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
-  destroyCharts(); refresh();
+  applyChartTheme(); destroyCharts(); refresh();
 });
 
 /* ---------- drawer ---------- */
@@ -317,6 +346,8 @@ function renderSeverity(allPoints) {
       label: g.label, data: points.map(p => sevOf(p, g)),
       backgroundColor: g.key === "INFO" ? css("--text-faint") + "8c" : css(g.color),
       stack: "s", borderRadius: 2, barPercentage: .62, categoryPercentage: .9, maxBarThickness: 26,
+      // 2px surface gap between stacked segments, so adjacent severities never touch.
+      borderColor: css("--bg-elev"), borderWidth: { top: 2, right: 0, bottom: 0, left: 0 }, borderSkipped: false,
     })),
   }, {
     plugins: { legend: { display: false } },
@@ -506,12 +537,14 @@ async function loadOverview() {
   upsert("cost", "chCost", "line", {
     labels: cs.map(p => hhmm(p.ts)),
     datasets: [
-      ds("CPU", cs.map(p => p.usdPerHour.cpu), css("--accent"), true),
-      ds("Memory", cs.map(p => p.usdPerHour.memory), css("--info"), true),
-      ds("Requests", cs.map(p => p.usdPerHour.requests), css("--ok"), true),
-      ds("Logging", cs.map(p => p.usdPerHour.logging), css("--cost"), true),
+      // Stacked bands: each fills only down to the band beneath it, so the
+      // tints never overlap into a muddy grey.
+      { ...ds("CPU", cs.map(p => p.usdPerHour.cpu), css("--s1"), true), fill: "origin" },
+      { ...ds("Memory", cs.map(p => p.usdPerHour.memory), css("--s2"), true), fill: "-1" },
+      { ...ds("Requests", cs.map(p => p.usdPerHour.requests), css("--s3"), true), fill: "-1" },
+      { ...ds("Logging", cs.map(p => p.usdPerHour.logging), css("--s4"), true), fill: "-1" },
     ],
-  }, { scales: { y: { stacked: true, grid: { color: css("--border-soft") }, ticks: { color: css("--text-faint"), font: { size: 10 }, callback: v => "$" + Number(v).toFixed(3) } }, x: { stacked: true, grid: { color: css("--border-soft") }, ticks: { color: css("--text-faint"), font: { size: 10 }, autoSkipPadding: 18 } } } });
+  }, { scales: { y: { stacked: true, grid: { color: css("--border-soft") }, ticks: { color: css("--text-faint"), font: { size: 10 }, callback: v => "$" + Number(v).toFixed(3) } }, x: { stacked: true, grid: { display: false }, ticks: { color: css("--text-faint"), font: { size: 10.5 }, maxRotation: 0, autoSkipPadding: 22 } } } });
 
   renderFunnel(f);
 
@@ -663,23 +696,6 @@ function tile(label, value, foot, cls, icon, tint) {
 function ds(label, data, color, fill) {
   return { label, data, borderColor: color, backgroundColor: fill ? color + "33" : color,
            fill: !!fill, tension: .3, borderWidth: 2, pointRadius: 0, pointHoverRadius: 3 };
-}
-function drawTraffic(points) {
-  const labels = points.map(p => hhmm(p.ts));
-  upsert("traffic", "chTraffic", "bar", {
-    labels,
-    datasets: [
-      { label: "2xx/3xx", data: points.map(p => Math.max(0, p.requests - p.errors5xx - p.errors4xx)), backgroundColor: css("--ok") + "cc", stack: "s", borderRadius: 2 },
-      { label: "4xx client", data: points.map(p => p.errors4xx), backgroundColor: css("--warn") + "cc", stack: "s", borderRadius: 2 },
-      { label: "5xx server", data: points.map(p => p.errors5xx), backgroundColor: css("--err") + "dd", stack: "s", borderRadius: 2 },
-      { label: "p95 latency (ms)", data: points.map(p => p.p95LatencyMs), type: "line", yAxisID: "y1",
-        borderColor: css("--accent"), borderWidth: 2, pointRadius: 0, tension: .3, fill: false },
-    ],
-  }, { scales: {
-      x: { stacked: true, grid: { color: css("--border-soft") }, ticks: { color: css("--text-faint"), font: { size: 10 }, autoSkipPadding: 18 } },
-      y: { stacked: true, grid: { color: css("--border-soft") }, ticks: { color: css("--text-faint"), font: { size: 10 } }, beginAtZero: true },
-      y1: { position: "right", grid: { display: false }, ticks: { color: css("--accent"), font: { size: 10 } }, beginAtZero: true },
-  } });
 }
 function renderServiceTable(svcs) {
   if (!svcs.length) { $("#svcTable").innerHTML = `<tbody><tr><td class="empty">No services reporting yet.</td></tr></tbody>`; return; }
@@ -864,7 +880,8 @@ async function loadErrors() {
   upsert("errsplit", "chErrSplit", "doughnut", {
     labels: ["5xx server", "4xx client", "successful"],
     datasets: [{ data: [t.errors5xx, t.errors4xx, Math.max(0, t.requests - t.errors5xx - t.errors4xx)],
-                 backgroundColor: [css("--err"), css("--warn"), css("--ok")], borderWidth: 0 }],
+                 backgroundColor: [css("--err"), css("--warn"), css("--ok")],
+                 borderColor: css("--bg-elev"), borderWidth: 2 }],
   }, { scales: null, cutout: "62%" });
 
   $("#errTable").innerHTML = e.groups.length === 0
@@ -1185,7 +1202,8 @@ async function loadCost() {
   upsert("costdrv", "chCostDriver", "doughnut", {
     labels: ["CPU", "Memory", "Requests", "Logging"],
     datasets: [{ data: [c.byDriver.cpu, c.byDriver.memory, c.byDriver.requests, c.byDriver.logging],
-                 backgroundColor: [css("--accent"), css("--info"), css("--ok"), css("--cost")], borderWidth: 0 }],
+                 backgroundColor: [css("--s1"), css("--s2"), css("--s3"), css("--s4")],
+                 borderColor: css("--bg-elev"), borderWidth: 2 }],
   }, { scales: null, cutout: "60%" });
 
   upsert("costsvc", "chCostSvc", "bar", {
@@ -1600,6 +1618,7 @@ async function refresh() {
 }
 
 (async function init() {
+  applyChartTheme();
   decorateNav();
   decorateHeadings();
   startStream();

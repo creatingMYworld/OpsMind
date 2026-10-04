@@ -21,9 +21,9 @@ if ("IntersectionObserver" in window) {
    dashboard's colour tokens written in. The marketing page does not load
    styles.css, so the values cannot be read from CSS variables here. */
 const C = {
-  border: "#233049", borderSoft: "#1b2435", elev2: "#18202f",
-  text: "#e6edf7", dim: "#93a4bf", faint: "#64748b",
-  accent: "#38bdf8", ok: "#34d399", warn: "#fbbf24", err: "#f87171"
+  border: "#232833", borderSoft: "#1b1f28", elev2: "#171b23",
+  text: "#e8ebf1", dim: "#a3abba", faint: "#7b8394",
+  accent: "#6c9cff", ok: "#34d399", warn: "#fbbf24", err: "#f87171"
 };
 const chartDefaults = () => ({
   responsive: true, maintainAspectRatio: false, animation: { duration: 220 },

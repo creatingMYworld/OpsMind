@@ -286,14 +286,14 @@ footer { padding: 36px 0; }
    step with styles.css if the dashboard tokens change.
    ------------------------------------------------------------------------ */
 .dash {
-  --d-bg-elev: #121825;
-  --d-bg-elev2: #18202f;
-  --d-border: #233049;
-  --d-border-soft: #1b2435;
-  --d-text: #e6edf7;
-  --d-text-dim: #93a4bf;
-  --d-text-faint: #64748b;
-  --d-accent: #38bdf8;
+  --d-bg-elev: #11141a;
+  --d-bg-elev2: #171b23;
+  --d-border: #232833;
+  --d-border-soft: #1b1f28;
+  --d-text: #e8ebf1;
+  --d-text-dim: #a3abba;
+  --d-text-faint: #7b8394;
+  --d-accent: #6c9cff;
   --d-ok: #34d399;
   --d-warn: #fbbf24;
   --d-err: #f87171;

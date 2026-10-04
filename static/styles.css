@@ -2,38 +2,55 @@
    at for hours, and the charts read better on a dark field. Light theme is
    supported for projectors and bright demo rooms. */
 :root {
-  --bg: #0b0f17;
-  --bg-elev: #121825;
-  --bg-elev2: #18202f;
-  --border: #233049;
-  --border-soft: #1b2435;
-  --text: #e6edf7;
-  --text-dim: #93a4bf;
-  --text-faint: #64748b;
-  --accent: #38bdf8;
-  --accent-dim: #0ea5e9;
+  /* Neutral near-black, shared with the landing page so the product reads as
+     one thing. Surfaces step up in lightness; borders carry separation. */
+  --bg: #0a0c10;
+  --bg-elev: #11141a;
+  --bg-elev2: #171b23;
+  --border: #232833;
+  --border-soft: #1b1f28;
+  --text: #e8ebf1;
+  --text-dim: #a3abba;
+  --text-faint: #7b8394;
+  --accent: #6c9cff;
+  --accent-dim: #4f84f5;
+  /* Status: reserved for state, never used as a series colour. */
   --ok: #34d399;
   --warn: #fbbf24;
   --err: #f87171;
   --crit: #e11d48;
-  --info: #818cf8;
+  --info: #8b93ff;
   --cost: #c084fc;
   --money: #fcd34d;
+  /* Categorical series, fixed order. Dataviz reference slots 1-4 stepped for
+     this dark surface; validated on #11141a: all checks pass, worst adjacent
+     CVD dE 8.4. */
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --s4: #c98500;
   --radius: 10px;
-  --shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.25);
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --shadow: none;
+  --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 :root[data-theme="light"] {
-  --bg: #f6f8fc; --bg-elev: #ffffff; --bg-elev2: #eef2f9;
-  --border: #d4dde9; --border-soft: #e4eaf3;
-  --text: #0f172a; --text-dim: #475569; --text-faint: #94a3b8;
-  --shadow: 0 1px 2px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.08);
+  --bg: #f4f5f8; --bg-elev: #ffffff; --bg-elev2: #f0f2f6;
+  --border: #dde1e8; --border-soft: #e9ecf1;
+  --text: #0f1420; --text-dim: #4b5565; --text-faint: #6b7385;
+  --accent: #3b6fe0; --accent-dim: #2f5fcc;
+  --ok: #0f9f6e; --warn: #b7791f; --err: #dc2626; --info: #5b5fd6; --cost: #9333ea;
+  /* Light steps of the same four hues. Two sit under 3:1 on white, so every
+     multi-series chart here carries a visible legend (the dataviz relief rule). */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --shadow: none;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
-  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font: 14px/1.5 var(--sans);
+  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
@@ -550,3 +567,61 @@ button.tb-btn:hover, label.tb-btn:hover { color: var(--text); border-color: colo
 .act-row dd { margin: 0; line-height: 1.5; }
 .act-go { margin-top: 10px; }
 @media (max-width: 640px) { .act-row { grid-template-columns: 1fr; gap: 2px; } }
+
+
+/* ======================================================================
+   Visual system pass
+   ====================================================================== */
+code, .mono, kbd, pre { font-family: var(--mono); }
+.main { background: var(--bg); }
+.view { padding: 22px 28px 40px; max-width: 1480px; width: 100%; margin: 0 auto; }
+
+/* Cards: flat, crisp border, a faint top highlight so they lift off the page
+   without a drop shadow. */
+.card {
+  box-shadow: none;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--text) 2.5%, transparent), transparent 42%), var(--bg-elev);
+  border-color: var(--border);
+}
+:root[data-theme="light"] .card { background: var(--bg-elev); box-shadow: 0 1px 2px rgba(15, 20, 32, .04); }
+.card h3 { font-size: 13.5px; font-weight: 600; letter-spacing: -.1px; }
+.grid { gap: 12px; }
+
+/* Numbers: tabular everywhere a value is compared or aligned. */
+.ktile-value, .strip-value, .tile .value, .num, .sev-n, .rank-val, td.num { font-variant-numeric: tabular-nums; }
+.ktile-value, .strip-value { font-weight: 650; letter-spacing: -.9px; }
+
+/* Rail */
+.rail { background: var(--bg); border-right-color: var(--border-soft); }
+.nav button { color: var(--text-dim); }
+.nav button:hover { background: var(--bg-elev); }
+.nav button.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); }
+
+/* Top bar */
+.topbar { background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom-color: var(--border-soft); }
+.tb-btn { background: var(--bg-elev); }
+
+/* Section rhythm */
+.sec-head { margin-top: 30px; border-bottom-color: var(--border-soft); }
+.eyebrow-label { color: var(--accent); opacity: .9; letter-spacing: .9px; font-size: 11px; }
+
+/* Tables */
+.svc-table th { font-size: 11px; color: var(--text-faint); font-weight: 600; letter-spacing: .6px; background: var(--bg-elev); }
+.svc-table tbody tr { transition: background .12s; }
+.svc-table tbody tr:hover { background: var(--bg-elev2); }
+
+/* Pills: softer fill, crisp edge */
+.pill { font-weight: 600; letter-spacing: .3px; }
+
+/* Focus is always visible */
+a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Scrollbars that belong to the theme */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
