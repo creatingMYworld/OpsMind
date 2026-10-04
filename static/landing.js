@@ -81,12 +81,26 @@ function charts() {
   }
   const ws = document.getElementById("chWorkspace");
   if (ws) {
-    const labels = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0") + ":00");
-    const req = labels.map((_, i) => Math.round(1800 + 420 * i + 900 * Math.sin(i / 3.2)));
-    const err = labels.map((_, i) => (i >= 11 && i <= 13 ? [620, 1480, 540][i - 11] : 90 + (i % 4) * 22));
-    new Chart(ws.getContext("2d"), { type: "line", options: chartDefaults(), data: {
-      labels,
-      datasets: [ds("Requests", req, C.accent, true), ds("Errors", err, C.err, false)]
+    // Where the errors come from, not when: a different question from the
+    // hero's line, so a different shape. Sorted, and only the worst service is
+    // red, so the answer is readable without the axis.
+    const services = [
+      ["checkout-api", 1480], ["payments", 612], ["auth", 214],
+      ["catalog", 96], ["orders", 71], ["search", 38]
+    ];
+    const o = chartDefaults();
+    o.indexAxis = "y";
+    o.plugins.legend = { display: false };
+    o.scales.x.ticks.callback = (v) => Number(v).toLocaleString();
+    o.scales.y = { grid: { display: false }, ticks: { color: C.dim, font: { size: 11 } } };
+    new Chart(ws.getContext("2d"), { type: "bar", options: o, data: {
+      labels: services.map((r) => r[0]),
+      datasets: [{
+        label: "Errors (24h)",
+        data: services.map((r) => r[1]),
+        backgroundColor: services.map((_, i) => (i === 0 ? C.err + "dd" : C.accent + "99")),
+        borderRadius: 3, barThickness: 16
+      }]
     }});
   }
 }
