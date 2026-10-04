@@ -1450,6 +1450,19 @@ async function loadServices() {
 }
 
 /* ---------- setup ---------- */
+/* Firestore does two jobs: user accounts (on whenever the portal runs on
+   Google Cloud) and daily history (HISTORY_ENABLED). The row names whichever
+   are on, and says so plainly when history cannot reach the database. */
+function firestoreRow(c, hist) {
+  const accounts = c.accountsBackend === "firestore";
+  const history = !!hist.enabled;
+  const jobs = [accounts && "Accounts", history && "History"].filter(Boolean);
+  const what = "User accounts and daily history";
+  if (history && hist.clientError) return ["grid", "info", "Firestore", what, false, "Unreachable", []];
+  if (!jobs.length) return ["grid", "info", "Firestore", what, false, c.dataSource === "gcp" ? "Off" : "Local mode", []];
+  return ["grid", "info", "Firestore", what, true, jobs.join(" · "), []];
+}
+
 async function loadSetup() {
   const m = state.meta || await api("/api/v1/meta");
   const c = m.config, col = m.collectors || {};
@@ -1477,6 +1490,7 @@ async function loadSetup() {
     ["sparkles", "cost", "Vertex AI · Gemini", "Incident explanations", !!c.aiEnabled, c.aiEnabled ? (c.aiModel || "On") : "Off", []],
     ["coins", "money", "Cloud Billing pricing", "Modeled spend", true, c.pricingVerifiedOn ? "Prices " + c.pricingVerifiedOn : "In use", []],
     ["nodes", "warn", "Resource Manager", "Project discovery", gcp, gcp ? "In use" : "Local mode", []],
+    firestoreRow(c, col.history || {}),
   ];
   $("#setupServices").innerHTML = svc.map(([icon, tint, name, what, on, st], i) => `
     <button class="card setup-svc is-click" data-svc="${i}" title="Show what ${esc(name)} costs">

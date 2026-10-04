@@ -93,6 +93,26 @@ never changed.
 Read it at `/api/v1/history/compare` and `/api/v1/history/days`, or look at
 **Today vs yesterday** on the Overview page.
 
+## Accounts
+
+People sign up, sign in, and manage their profile at `/account`. The access
+token is still the root of access: **creating an account needs the token**,
+either from the `?token=` link the person arrived on or typed in as an access
+code. Open sign-up would hand the project's logs to anyone who found the URL.
+After that, signing in is how they come back — no token in a bookmark.
+
+Opening the portal without access lands on `/signin` instead of an error page.
+The `?token=` link still opens the product pages, but the dashboard itself
+(`/app`, where every Start button goes) needs a signed-in account — with or
+without a token. Not signed in, Start goes to sign in first and then on to the
+dashboard. The API keeps accepting the token, so scripts need no account.
+
+Accounts live in **Firestore** on Cloud Run, because Cloud Run scales to zero
+and forgets memory. Locally they live in memory and the account page says so.
+Passwords are hashed with PBKDF2-HMAC-SHA256 (600,000 iterations, per-password
+salt); sessions are signed cookies, checked without a database read. Setup is
+Steps 1–3 of DEPLOY.md Part 10 — no new environment variable is needed.
+
 ## Deploy
 
 See **[DEPLOY.md](DEPLOY.md)**. Unlike the application it watches, OpsMind
@@ -135,3 +155,6 @@ reading Cloud Logging, so the whole portal works with no GCP project at all.
 | `HISTORY_EVENTS_COLLECTION` | Incident history collection, default `opsmind_incidents` |
 | `HISTORY_WRITE_INTERVAL_S` | How often a rollup is written, default 300s |
 | `HISTORY_TZ_OFFSET_MINUTES` | Which clock ends the day, default 330 (IST). UTC would roll over at 05:30 local |
+| `ACCOUNTS_BACKEND` | Where accounts live: `firestore` (default when `DATA_SOURCE=gcp`) or `memory` (default locally; lost on restart) |
+| `ACCOUNTS_COLLECTION` | Firestore collection for accounts, default `opsmind_users` |
+| `SESSION_SECRET` | Signs sign-in cookies. Defaults to a value derived from `DASHBOARD_TOKEN`, so rotating the token signs everyone out |

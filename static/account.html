@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account · OpsMind</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/landing.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="/">
+      <span class="logo-mark" aria-hidden="true">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 8.5 4 5l2.2 2.2L11 2" stroke="#6c9cff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      OpsMind
+    </a>
+    <div class="nav-links">
+      <a href="/#product">Product</a>
+      <a href="/#clouds">Clouds</a>
+      <a href="/about">About</a>
+      <a href="/how-it-works">How it works</a>
+    </div>
+    <div class="nav-cta">
+      <!--auth--><a class="btn btn-ghost" href="/signin">Sign in</a><!--/auth-->
+      <a class="btn btn-primary" href="/app#setup">Start</a>
+    </div>
+  </div>
+</nav>
+
+<main id="account" class="acct grid-bg">
+  <div class="wrap">
+    <div class="acct-hero">
+      <span class="avatar avatar-lg" id="acctAvatar" aria-hidden="true"></span>
+      <div class="acct-who">
+        <div class="eyebrow">Account</div>
+        <h1 id="acctName">&nbsp;</h1>
+        <p class="acct-email" id="acctEmail">&nbsp;</p>
+      </div>
+      <div class="acct-hero-actions">
+        <a class="btn btn-primary" href="/app">Open dashboard</a>
+      </div>
+    </div>
+
+    <p class="notice" id="acctNotice" hidden></p>
+    <p class="form-error acct-load-error" id="acctError" role="alert" hidden></p>
+
+    <div class="acct-grid">
+      <div class="acct-col">
+        <div class="panel acct-card">
+          <h3>Profile</h3>
+          <p class="acct-card-sub">How your name appears in OpsMind.</p>
+          <form id="profileForm" class="form">
+            <label class="field">
+              <span>Full name</span>
+              <input class="input" type="text" name="name" autocomplete="name" maxlength="80" required>
+            </label>
+            <label class="field">
+              <span>Email</span>
+              <input class="input" type="email" name="email" readonly>
+              <span class="field-hint">Your email is how you sign in, so it cannot be changed here.</span>
+            </label>
+            <p class="form-error" role="alert" hidden></p>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit" data-busy="Saving…">Save changes</button>
+              <span class="form-ok" role="status" hidden>Saved</span>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel acct-card">
+          <h3>Password</h3>
+          <p class="acct-card-sub">Last changed <span id="acctPwChanged">—</span>.</p>
+          <form id="passwordForm" class="form">
+            <label class="field">
+              <span>Current password</span>
+              <input class="input" type="password" name="currentPassword" autocomplete="current-password" required>
+            </label>
+            <label class="field">
+              <span>New password</span>
+              <input class="input" type="password" name="newPassword" autocomplete="new-password" minlength="8" required>
+              <span class="field-hint">At least 8 characters.</span>
+            </label>
+            <label class="field">
+              <span>Confirm new password</span>
+              <input class="input" type="password" name="confirmPassword" autocomplete="new-password" minlength="8" required>
+            </label>
+            <p class="form-error" role="alert" hidden></p>
+            <div class="form-actions">
+              <button class="btn btn-ghost" type="submit" data-busy="Updating…">Update password</button>
+              <span class="form-ok" role="status" hidden>Password updated</span>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="acct-col">
+        <div class="panel acct-card">
+          <h3>Workspace</h3>
+          <p class="acct-card-sub">What this OpsMind is watching.</p>
+          <dl class="kv">
+            <div><dt>Project</dt><dd id="wsProject">—</dd></div>
+            <div><dt>Region</dt><dd id="wsRegion">—</dd></div>
+            <div><dt>Source</dt><dd id="wsSource">—</dd></div>
+            <div><dt>Access</dt><dd>Read-only</dd></div>
+          </dl>
+        </div>
+
+        <div class="panel acct-card">
+          <h3>Session</h3>
+          <dl class="kv">
+            <div><dt>Member since</dt><dd id="acctCreated">—</dd></div>
+            <div><dt>Last sign-in</dt><dd id="acctLastSignIn">—</dd></div>
+          </dl>
+          <button class="btn btn-ghost btn-block acct-signout" id="signOut" type="button">Sign out</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot-in">
+    <span>© OpsMind</span>
+    <div class="foot-links">
+      <a href="/how-it-works">How it works</a>
+      <a href="/about">About</a>
+      <a href="/app">Dashboard</a>
+    </div>
+  </div>
+</footer>
+
+<script src="/static/auth.js"></script>
+</body>
+</html>

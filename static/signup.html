@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create account · OpsMind</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/landing.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="/">
+      <span class="logo-mark" aria-hidden="true">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 8.5 4 5l2.2 2.2L11 2" stroke="#6c9cff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      OpsMind
+    </a>
+  </div>
+</nav>
+
+<main class="auth grid-bg">
+  <div class="auth-bg" aria-hidden="true"></div>
+  <div class="auth-card panel">
+    <div class="eyebrow">Sign up</div>
+    <h1 class="auth-title">Create your account</h1>
+    <p class="auth-sub">One account for every project you monitor.</p>
+
+    <form id="signupForm" class="form">
+      <label class="field">
+        <span>Full name</span>
+        <input class="input" type="text" name="name" autocomplete="name" maxlength="80" required autofocus>
+      </label>
+      <label class="field">
+        <span>Work email</span>
+        <input class="input" type="email" name="email" autocomplete="email" required>
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required>
+        <span class="field-hint">At least 8 characters.</span>
+      </label>
+      <!--access-code-->
+      <label class="field">
+        <span>Access code</span>
+        <input class="input" type="password" name="accessCode" autocomplete="off" required>
+        <span class="field-hint">The token from your OpsMind link. You only need it once.</span>
+      </label>
+      <!--/access-code-->
+      <p class="form-error" role="alert" hidden></p>
+      <button class="btn btn-primary btn-lg btn-block" type="submit" data-busy="Creating account…">Create account</button>
+    </form>
+
+    <p class="auth-alt">Already have an account? <a href="/signin" data-keep-next>Sign in</a></p>
+  </div>
+</main>
+
+<script src="/static/auth.js"></script>
+</body>
+</html>

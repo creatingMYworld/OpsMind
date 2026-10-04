@@ -206,7 +206,11 @@ export OPSMIND_URL=$(gcloud run services describe opsmind-portal --region $REGIO
 ```
 
 That URL is the **product page**. The dashboard itself is at `/app`, and the
-Start button routes to `/app#projects` — the project picker.
+Start button routes to `/app#projects` — the project picker. The dashboard
+page needs a signed-in account: Start sends anyone not signed in to sign in
+first (or to create an account — the token link covers the access code), then
+on to the dashboard. The API still accepts `?token=` without an account, so
+the `curl` checks below work as written.
 
 ---
 
@@ -242,8 +246,9 @@ cd ~/CogniKart && python3 loadgen/loadgen.py --url $GATEWAY_URL --profile normal
 echo "$OPSMIND_URL/?token=$DASHBOARD_TOKEN"
 ```
 
-Within a few seconds the Live Logs view should stream entries from all four
-CogniKart services. Charts fill in over the next few minutes.
+Press **Start**, then sign in or create an account (accounts need Part 10,
+Steps 1–3). Within a few seconds the Live Logs view should stream entries from
+all four CogniKart services. Charts fill in over the next few minutes.
 
 ### The whole pipeline, in one gesture
 
@@ -397,6 +402,21 @@ curl -s "$OPSMIND_URL/api/v1/history/compare?token=$DASHBOARD_TOKEN" | python3 -
 **Expect `available: false` with "Historical data is being collected" today.**
 That is correct, not a fault: a comparison needs a full day on both sides, so
 it starts working tomorrow. Nothing is estimated to fill the gap.
+
+### Accounts use the same database — and are not optional
+
+Sign-up and sign-in store accounts in Firestore, in the `opsmind_users`
+collection. **Steps 1–3 above are all they need**: with `DATA_SOURCE=gcp` the
+portal uses Firestore for accounts by default, so there is no variable to set
+and `HISTORY_ENABLED` can stay off. Then redeploy (Part 11).
+
+Without Steps 1–3, the `?token=` link still works, but creating an account
+fails with *"Accounts are unavailable right now"* and the reason. That message
+is the signal to come back here.
+
+Check it end to end: open `$OPSMIND_URL/signup?token=$DASHBOARD_TOKEN`, create
+an account, sign out on `/account`, then open `$OPSMIND_URL` with no token. It
+should show the sign-in page, and your email and password should get you in.
 
 ### What it costs
 

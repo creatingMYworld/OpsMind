@@ -23,15 +23,20 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import secrets
 import threading
 import time
+from html import escape as _esc
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
+                               StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 
+from . import accounts
 from .collectors import local as local_collector
 from .collectors.evaluator import evaluator
 from . import history
@@ -76,9 +81,16 @@ _started_at = time.time()
 #
 # A token presented once in the query string is exchanged for a cookie, so the
 # page's own API calls authenticate without the token travelling in every URL.
+#
+# A signed-in account is the other way through the gate. Creating one needs the
+# token (see accounts.py), so accounts widen nothing: they are a way back in
+# without keeping the token in a bookmark. The sign-in and sign-up pages and
+# the /api/v1/auth/ endpoints are open, because they are how a person gets in;
+# each endpoint checks for itself what it needs.
 TOKEN_COOKIE = "opsmind_token"
-_OPEN_PATHS = ("/healthz", "/readyz", "/internal/ingest", "/favicon.ico")
-_OPEN_PREFIXES = ("/static/",)
+_OPEN_PATHS = ("/healthz", "/readyz", "/internal/ingest", "/favicon.ico",
+               "/signin", "/signup")
+_OPEN_PREFIXES = ("/static/", "/api/v1/auth/")
 
 
 def _supplied_token(request: Request) -> str:
@@ -87,41 +99,66 @@ def _supplied_token(request: Request) -> str:
             or request.cookies.get(TOKEN_COOKIE, ""))
 
 
+def _is_token(value: str) -> bool:
+    # Bytes, so a non-ASCII value is a failed match rather than a TypeError.
+    return bool(settings.dashboard_token) and secrets.compare_digest(
+        (value or "").encode("utf-8"), settings.dashboard_token.encode("utf-8"))
+
+
+def _session(request: Request) -> Optional[Dict[str, Any]]:
+    """Who signed in, from the cookie alone. Cheap enough for every request."""
+    return accounts.read_session(request.cookies.get(accounts.SESSION_COOKIE, ""))
+
+
+def _account_user(request: Request) -> Optional[Dict[str, Any]]:
+    """The signed-in person, if their account still exists. For pages.
+
+    The cookie proves who signed in; the lookup catches an account that has
+    since gone (a memory-held one after a restart), which would otherwise
+    show an avatar for nobody. If the store cannot be reached, the signed
+    cookie is trusted rather than locking everyone out.
+    """
+    user = _session(request)
+    if not user:
+        return None
+    try:
+        return user if accounts.get(user["id"]) is not None else None
+    except accounts.AccountsUnavailable:
+        return user
+
+
+def _https(request: Request) -> bool:
+    proto = request.headers.get("x-forwarded-proto", "") or request.url.scheme
+    return proto == "https"
+
+
 @app.middleware("http")
 async def guard(request: Request, call_next):
     if not settings.dashboard_token:
         return await call_next(request)
 
     path = request.url.path
-    if path in _OPEN_PATHS or path.startswith(_OPEN_PREFIXES):
-        return await call_next(request)
-
-    supplied = _supplied_token(request)
-    if not secrets.compare_digest(supplied, settings.dashboard_token):
+    is_open = path in _OPEN_PATHS or path.startswith(_OPEN_PREFIXES)
+    if (not is_open and not _is_token(_supplied_token(request))
+            and _session(request) is None):
         # An unauthenticated page request should land somewhere a person can
-        # act on, not a JSON error they cannot read.
+        # act on: the sign-in page, which brings them back here afterwards.
         if request.headers.get("accept", "").startswith("text/html"):
-            return HTMLResponse(
-                "<!doctype html><meta charset=utf-8>"
-                "<title>OpsMind</title>"
-                "<body style=\"font:16px/1.6 system-ui;background:#1a0b2e;"
-                "color:#ede9fe;display:grid;place-items:center;height:100vh;"
-                "margin:0;text-align:center\">"
-                "<div><h1 style=\"margin:0 0 10px\">OpsMind</h1>"
-                "<p style=\"color:#c9bfe4\">This dashboard needs an access token.<br>"
-                "Open it as <code>?token=YOUR_TOKEN</code>.</p></div>",
-                status_code=401)
+            return RedirectResponse("/signin?next=" + quote(path, safe="/"),
+                                    status_code=303)
         return JSONResponse(status_code=401,
                             content={"error": "invalid or missing token"})
 
     response = await call_next(request)
     # Exchange a query-string token for a cookie, so the page's own fetches
-    # are authenticated and the token stops appearing in every URL.
-    if request.query_params.get("token") and not request.cookies.get(TOKEN_COOKIE):
-        proto = request.headers.get("x-forwarded-proto", "") or request.url.scheme
+    # are authenticated and the token stops appearing in every URL. Open
+    # paths too: /signup?token=... hides the access-code field, so the sign-up
+    # that follows has to carry the token some other way.
+    if (_is_token(request.query_params.get("token", ""))
+            and not request.cookies.get(TOKEN_COOKIE)):
         response.set_cookie(
             TOKEN_COOKIE, settings.dashboard_token, httponly=True,
-            samesite="lax", secure=(proto == "https"), max_age=12 * 3600, path="/")
+            samesite="lax", secure=_https(request), max_age=12 * 3600, path="/")
     return response
 
 
@@ -818,46 +855,208 @@ def _asset_version() -> str:
     newest = 0.0
     for name in ("app.js", "styles.css", "index.html",
                  "landing.html", "landing.css", "landing.js",
-                 "how-it-works.html", "about.html"):
+                 "how-it-works.html", "about.html",
+                 "signin.html", "signup.html", "account.html", "auth.js"):
         path = os.path.join(_STATIC, name)
         if os.path.exists(path):
             newest = max(newest, os.path.getmtime(path))
     return hashlib.sha1(str(newest).encode()).hexdigest()[:10]
 
 
-def _page(filename: str) -> Any:
+# The nav's sign-in button sits between these markers. For a signed-in person
+# it is swapped for their avatar on the server, so the page never flashes the
+# wrong one while a script works it out.
+_NAV_AUTH = re.compile(r"<!--auth-->.*?<!--/auth-->", re.S)
+# The sign-up page's access-code field, dropped when the person already
+# arrived through the token link.
+_ACCESS_CODE = re.compile(r"<!--access-code-->.*?<!--/access-code-->", re.S)
+
+
+def _page(filename: str, request: Optional[Request] = None,
+          strip_access_code: bool = False) -> Any:
     path = os.path.join(_STATIC, filename)
     if not os.path.exists(path):
         return None
     with open(path, encoding="utf-8") as fh:
         html = fh.read()
     v = _asset_version()
-    for asset in ("app.js", "styles.css", "landing.js", "landing.css"):
+    for asset in ("app.js", "styles.css", "landing.js", "landing.css", "auth.js"):
         html = html.replace("/static/" + asset, "/static/%s?v=%s" % (asset, v))
+    user = _account_user(request) if request is not None else None
+    if user:
+        current = ' aria-current="page"' if filename == "account.html" else ""
+        html = _NAV_AUTH.sub(
+            '<a class="nav-profile" href="/account" title="%s"%s>'
+            '<span class="nav-avatar">%s</span></a>' % (
+                _esc("Account · " + (user["name"] or user["email"])), current,
+                _esc(user["initials"])),
+            html)
+    if strip_access_code:
+        html = _ACCESS_CODE.sub("", html)
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/", include_in_schema=False)
-def landing() -> Any:
+def landing(request: Request) -> Any:
     """The product page. Deliberately a separate document from the dashboard:
     it has its own visual language and should not pay for the dashboard's
     JavaScript before anyone has pressed anything."""
-    page = _page("landing.html")
-    return page if page is not None else dashboard()
+    page = _page("landing.html", request)
+    return page if page is not None else dashboard(request)
 
 
 @app.get("/how-it-works", include_in_schema=False)
-def how_it_works() -> Any:
-    return _page("how-it-works.html") or landing()
+def how_it_works(request: Request) -> Any:
+    return _page("how-it-works.html", request) or landing(request)
 
 
 @app.get("/about", include_in_schema=False)
-def about() -> Any:
-    return _page("about.html") or landing()
+def about(request: Request) -> Any:
+    return _page("about.html", request) or landing(request)
+
+
+# --- accounts -------------------------------------------------------------
+
+def _safe_next(value: Optional[str]) -> str:
+    """Only a path on this site: never a redirect somewhere else."""
+    value = (value or "").strip()
+    if not value.startswith("/") or value.startswith(("//", "/\\")):
+        return "/"
+    return value
+
+
+@app.get("/signin", include_in_schema=False)
+def signin_page(request: Request, next_: str = Query("/", alias="next")) -> Any:
+    if _account_user(request):
+        return RedirectResponse(_safe_next(next_), status_code=303)
+    return _page("signin.html")
+
+
+@app.get("/signup", include_in_schema=False)
+def signup_page(request: Request, next_: str = Query("/", alias="next")) -> Any:
+    if _account_user(request):
+        return RedirectResponse(_safe_next(next_), status_code=303)
+    needs_code = bool(settings.dashboard_token) and not _is_token(
+        _supplied_token(request))
+    return _page("signup.html", strip_access_code=not needs_code)
+
+
+@app.get("/account", include_in_schema=False)
+def account_page(request: Request) -> Any:
+    if _account_user(request) is None:
+        return RedirectResponse("/signin?next=/account", status_code=303)
+    return _page("account.html", request)
+
+
+def _accounts_call(fn: Any, *args: Any) -> Any:
+    try:
+        return fn(*args)
+    except accounts.AccountError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message)
+    except accounts.AccountsUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Accounts are unavailable right now (%s). See DEPLOY.md, "
+                   "Part 10, to set up Firestore." % exc)
+
+
+def _signed_in(response: JSONResponse, request: Request,
+               row: Dict[str, Any]) -> JSONResponse:
+    response.set_cookie(
+        accounts.SESSION_COOKIE, accounts.issue_session(row), httponly=True,
+        samesite="lax", secure=_https(request),
+        max_age=accounts.SESSION_MAX_AGE_S, path="/")
+    return response
+
+
+def _require_session(request: Request) -> Dict[str, Any]:
+    user = _session(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in first.")
+    return user
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
+@app.post("/api/v1/auth/signup")
+def auth_signup(request: Request, body: Dict[str, Any] = Body(...)) -> Any:
+    # The token is the invitation. Without it, sign-up would be a public door
+    # to the project's logs.
+    if (settings.dashboard_token and not _is_token(_supplied_token(request))
+            and not _is_token(str(body.get("accessCode") or "").strip())):
+        raise HTTPException(
+            status_code=403,
+            detail="That access code is not right. Ask whoever runs this "
+                   "OpsMind workspace for it.")
+    row = _accounts_call(accounts.sign_up, body.get("name"), body.get("email"),
+                         body.get("password"))
+    return _signed_in(JSONResponse({"user": accounts.public(row)}), request, row)
+
+
+@app.post("/api/v1/auth/signin")
+def auth_signin(request: Request, body: Dict[str, Any] = Body(...)) -> Any:
+    row = _accounts_call(accounts.sign_in, body.get("email"),
+                         body.get("password"), _client_ip(request))
+    return _signed_in(JSONResponse({"user": accounts.public(row)}), request, row)
+
+
+@app.post("/api/v1/auth/signout")
+def auth_signout() -> Any:
+    # Both cookies: signing out of a browser that also holds the token link's
+    # cookie should leave it signed out, not quietly still let in.
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(accounts.SESSION_COOKIE, path="/")
+    response.delete_cookie(TOKEN_COOKIE, path="/")
+    return response
+
+
+@app.get("/api/v1/auth/me")
+def auth_me(request: Request) -> Any:
+    user = _session(request)
+    store_status = _accounts_call(accounts.status)
+    if not user:
+        return {"user": None, "accounts": store_status}
+    row = _accounts_call(accounts.get, user["id"])
+    if row is None:
+        # A valid cookie for an account that is gone: a memory-held account
+        # after a restart. Say so and clear the cookie rather than pretend.
+        response = JSONResponse({"user": None, "accounts": store_status})
+        response.delete_cookie(accounts.SESSION_COOKIE, path="/")
+        return response
+    return {"user": accounts.public(row), "accounts": store_status}
+
+
+@app.patch("/api/v1/auth/me")
+def auth_update(request: Request, body: Dict[str, Any] = Body(...)) -> Any:
+    user = _require_session(request)
+    row = _accounts_call(accounts.rename, user["id"], body.get("name"))
+    # Re-issued so the nav shows the new name on the next page.
+    return _signed_in(JSONResponse({"user": accounts.public(row)}), request, row)
+
+
+@app.post("/api/v1/auth/password")
+def auth_password(request: Request, body: Dict[str, Any] = Body(...)) -> Any:
+    user = _require_session(request)
+    row = _accounts_call(accounts.change_password, user["id"],
+                         body.get("currentPassword"), body.get("newPassword"))
+    return _signed_in(JSONResponse({"user": accounts.public(row)}), request, row)
 
 
 @app.get("/app", include_in_schema=False)
-def dashboard() -> Any:
+def dashboard(request: Request) -> Any:
+    # Every Start button and Dashboard link lands here, so this is where
+    # "sign in first" is decided -- for the page, gate or no gate. The API
+    # keeps accepting the token as well, so scripts and the DEPLOY.md checks
+    # still work without an account.
+    if _account_user(request) is None:
+        response = RedirectResponse("/signin?next=/app", status_code=303)
+        response.delete_cookie(accounts.SESSION_COOKIE, path="/")
+        return response
     index = os.path.join(_STATIC, "index.html")
     if not os.path.exists(index):
         return JSONResponse({

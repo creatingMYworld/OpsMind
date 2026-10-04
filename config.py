@@ -130,6 +130,18 @@ class Settings:
         # without this set. See docs/DEPLOY.md step 8.
         self.dashboard_token: str = _env("DASHBOARD_TOKEN", "")
 
+        # User accounts. Cloud Run scales to zero and forgets everything held
+        # in memory, so a deployed portal keeps accounts in Firestore; a local
+        # one keeps them in memory and says so on the account page.
+        self.accounts_backend: str = _env(
+            "ACCOUNTS_BACKEND",
+            "firestore" if self.data_source == "gcp" else "memory").lower()
+        self.accounts_collection: str = _env("ACCOUNTS_COLLECTION", "opsmind_users")
+        # Signs session cookies. When unset it is derived from DASHBOARD_TOKEN,
+        # which every instance already shares, so sessions survive a restart
+        # and work across instances without another variable to set.
+        self.session_secret: str = _env("SESSION_SECRET", "")
+
         self.pricing: Dict = self._load_pricing()
         self.inr_per_usd: float = float(
             self.pricing.get("indicativeInrPerUsd", 83.0)
@@ -173,6 +185,7 @@ class Settings:
             "logsPollIntervalS": self.logs_poll_interval_s,
             "metricsPollIntervalS": self.metrics_poll_interval_s,
             "historyEnabled": self.history_enabled,
+            "accountsBackend": self.accounts_backend,
         }
 
 
