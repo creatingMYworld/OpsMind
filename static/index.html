@@ -31,6 +31,7 @@
       <button data-view="incidents" data-nicon="alert">Incidents <span class="badge" id="incBadge" style="display:none">0</span></button>
       <button data-view="insights" data-nicon="sparkles">Insights <span class="badge" id="insBadge" style="display:none">0</span></button>
       <button data-view="services" data-nicon="layers">Services</button>
+      <button data-view="performance" data-nicon="gauge">Performance</button>
       <button data-view="logs" data-nicon="scroll">Logs</button>
       <button data-view="resources" data-nicon="cpu">Resources</button>
       <button data-view="cost" data-nicon="banknote">Cost</button>
@@ -231,17 +232,39 @@
     <!-- INSIGHTS -->
     <section class="view" id="view-insights">
       <h2>Insights</h2>
-      <div class="lede">Repeating log patterns and statistical anomalies. Both are deterministic: identical inputs always produce identical findings, and every finding carries the evidence behind it.</div>
-      <div class="card" style="margin-bottom:14px">
-        <h3>Anomalies <span class="tier live">live</span></h3>
-        <div class="hint">Each series compared against its own recent baseline. A fixed threshold cannot answer "is this unusual <em>for this service</em>?" — a service that normally serves 2 req/min jumping to 20 is a tenfold change no threshold would catch.</div>
+      <div class="lede">Repeating log patterns and statistical anomalies.</div>
+      <div class="grid g4" id="insTiles"></div>
+      <div class="card ins-card">
+        <div class="card-row"><h3 id="anomTitle">Anomalies</h3><span class="faint ins-note" id="anomNote"></span></div>
         <div id="anomalyList"></div>
       </div>
-      <div class="card">
-        <h3>Log patterns</h3>
-        <div class="hint" id="patternHint">Every log line clustered by message template — identifiers, hashes, quoted strings and measurements are masked, then identical templates counted. Click a pattern to see its logs.</div>
-        <div style="overflow-x:auto"><table id="patternTable"></table></div>
+      <div class="card flush ins-card">
+        <div class="card-row pad"><h3>Failure patterns</h3><span class="faint ins-note">warnings and errors</span></div>
+        <div style="overflow-x:auto"><table class="pat-table" id="failPatTable"></table></div>
       </div>
+      <div class="card flush ins-card">
+        <div class="card-row pad"><h3>All patterns, including routine traffic</h3><span class="faint ins-note" id="patNote"></span></div>
+        <div style="overflow-x:auto"><table class="pat-table" id="patternTable"></table></div>
+      </div>
+    </section>
+
+    <!-- PERFORMANCE -->
+    <section class="view" id="view-performance">
+      <h2>Performance</h2>
+      <div class="lede">Latency percentiles, throughput and every route.</div>
+      <div class="grid g4" id="perfTiles"></div>
+      <div class="grid g2" style="margin-top:12px">
+        <div class="card chart-card">
+          <div class="card-row"><h3>Latency percentiles</h3><div class="legend-inline" id="perfLatLegend"></div></div>
+          <div class="chart-wrap"><canvas id="chPerfLat"></canvas></div>
+        </div>
+        <div class="card chart-card">
+          <div class="card-row"><h3>Throughput and failures</h3><div class="legend-inline" id="perfTpLegend"></div></div>
+          <div class="chart-wrap"><canvas id="chPerfTp"></canvas></div>
+        </div>
+      </div>
+      <div class="sec-head"><div><div class="eyebrow-label">Routes</div><h2 class="sec-title" id="perfRoutesTitle">All routes</h2></div></div>
+      <div class="card flush"><div style="overflow-x:auto"><table class="pat-table" id="perfRoutes"></table></div></div>
     </section>
 
     <!-- SERVICES -->
@@ -272,23 +295,14 @@
     <!-- INCIDENTS -->
     <section class="view" id="view-incidents">
       <h2>Incidents</h2>
-      <div class="lede">Thresholds crossed, grouped by cause, with the fix. Expand one for its impact, suspected root cause, top errors, a sample trace and an explanation.</div>
-
+      <div class="lede">Thresholds crossed, grouped by cause, with the fix.</div>
       <div class="grid g4" id="incTiles"></div>
-      <div class="legend" id="incLegend"></div>
-      <div id="rootCauseBanner" style="margin-top:16px"></div>
-
-      <div class="card" style="margin-top:14px">
-        <h3>Breaching now</h3>
-        <div class="hint">Conditions currently outside their threshold. These need someone.</div>
-        <div id="incBreaching"></div>
-      </div>
-
-      <div class="card" style="margin-top:14px">
-        <h3>Resolved in this window</h3>
-        <div class="hint">Stopped breaching on their own. Worth a look, not an interruption.</div>
-        <div id="incResolved"></div>
-      </div>
+      <div class="legend inc-legend" id="incLegend"></div>
+      <div id="rootCauseBanner"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">Now</div><h2 class="sec-title">Breaching</h2></div><span id="incBreachChip"></span></div>
+      <div id="incBreaching" class="inc-list"></div>
+      <div class="sec-head"><div><div class="eyebrow-label">This window</div><h2 class="sec-title">Resolved</h2></div><span id="incResolvedChip"></span></div>
+      <div id="incResolved" class="inc-list"></div>
     </section>
   </main>
 </div>

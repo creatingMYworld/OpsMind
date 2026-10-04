@@ -733,6 +733,7 @@ const NAV_ICONS = {
   cpu: '<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
   banknote: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
   bell: '<path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/>',
+  gauge: '<path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/>',
   settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'
 };
 function decorateNav() {
@@ -1117,46 +1118,123 @@ async function loadProjects() {
 async function loadInsights() {
   const [an, pat] = await Promise.all([
     api(`/api/v1/anomalies?window=${Math.max(state.window, 20)}`),
-    api(`/api/v1/patterns?window=${state.window}&limit=25`),
+    api(`/api/v1/patterns?window=${state.window}&limit=60`),
   ]);
+  const all = pat.patterns || [];
+  const failing = all.filter(p => p.severity !== "INFO" && p.severity !== "DEBUG");
+  const top = failing[0];
+  const anoms = an.anomalies || [];
 
-  $("#anomalyList").innerHTML = an.anomalies.length === 0
-    ? `<div class="empty">${esc(an.note || "No series is departing from its baseline.")}</div>`
-    : an.anomalies.map(a => `
-      <div class="rec ${a.severity}">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <strong>${esc(a.label)}</strong>
-          <span class="pill ${a.direction === "up" ? "err" : "info"}">
-            ${a.changePct === null ? "" : (a.changePct > 0 ? "+" : "") + nf(a.changePct, 1) + "%"}</span>
-          <span class="pill muted">z = ${nf(a.zScore, 1)}</span>
-        </div>
-        <div class="why">${esc(a.whyItMatters)}</div>
-        <div class="faint" style="font-size:12px;margin-top:4px">${esc(a.evidence)}</div>
-      </div>`).join("")
-      + `<div class="faint" style="font-size:11.5px;margin-top:8px">${esc(an.method || "")}</div>`;
+  $("#insTiles").innerHTML = [
+    linkTile({ label: "Distinct failure patterns", value: nf(failing.length),
+               foot: `of ${nf(pat.distinctPatterns)} patterns in ${nf(pat.total)} lines`, href: "#insights" }),
+    linkTile({ label: "Top pattern", value: top ? nf(top.count) : "0", valueColor: top && top.severity === "ERROR" ? "--err" : top ? "--warn" : null,
+               foot: top ? `${esc(svcShort((top.services || [])[0]))} · ${esc(top.topEvent || top.pattern)}` : "nothing repeating",
+               href: top ? buildHash("logs", { q: (top.errorCodes || [])[0] || top.topEvent || "", service: (top.services || [])[0] || "" }) : "#logs" }),
+    linkTile({ label: "Concentration", value: top ? pct(top.sharePct, 1) : "—",
+               foot: "share of the window carried by the top failure", href: "#insights" }),
+    linkTile({ label: "Anomalies", value: nf(anoms.length), valueColor: anoms.length ? "--warn" : "--ok",
+               foot: `series beyond ${nf(an.sigma || 3, 1)}σ of their own baseline`, href: "#insights" }),
+  ].join("");
 
-  $("#patternHint").textContent =
-    `${nf(pat.total)} log lines in this window collapsed into ${nf(pat.distinctPatterns)} distinct patterns. Click one to see its logs.`;
-  $("#patternTable").innerHTML = pat.patterns.length === 0
-    ? `<tbody><tr><td class="empty">No log lines in this window.</td></tr></tbody>`
-    : `<thead><tr><th>Pattern</th><th>Services</th><th class="right">Count</th><th class="right">Share</th><th class="right">p95</th><th class="right">At risk</th></tr></thead><tbody>`
-      + pat.patterns.map((p, i) => `<tr class="clickable" data-p="${i}">
-          <td><span class="sev ${esc(p.severity)}">${esc(p.severity)}</span>
-              <span class="mono" style="margin-left:6px">${esc(p.pattern)}</span></td>
-          <td class="faint">${esc((p.services || []).map(x => x.replace("cognikart-", "")).join(", "))}</td>
-          <td class="num">${nf(p.count)}</td>
-          <td class="num">${nf(p.sharePct, 1)}%</td>
-          <td class="num">${p.p95LatencyMs === null ? "—" : nf(p.p95LatencyMs) + "ms"}</td>
-          <td class="num">${p.revenueAtRiskInr ? inr(p.revenueAtRiskInr) : "—"}</td>
-        </tr>`).join("") + `</tbody>`;
+  $("#anomTitle").textContent = `Anomalies · baseline-relative, ${nf(an.sigma || 3, 1)}σ`;
+  $("#anomNote").textContent = anoms.length ? `${nf(anoms.length)} found` : "";
+  $("#anomalyList").innerHTML = anoms.length === 0
+    ? `<div class="empty">No series is departing from its own baseline.</div>`
+    : anoms.map(a => {
+        const tone = a.severity === "CRITICAL" || a.severity === "HIGH" ? "--err" : "--warn";
+        const dir = a.direction === "up" ? "rose" : "fell";
+        const unit = a.unit ? " " + esc(a.unit) : "";
+        return `<div class="anom-row" style="--tone:var(${tone})">
+          <div class="anom-text">
+            <div class="anom-title">${esc(a.label)} ${dir} to ${nf(a.current, 1)}${unit}
+              ${a.changePct == null ? "" : `<span class="faint">(${a.changePct > 0 ? "+" : ""}${nf(a.changePct, 0)}% vs baseline)</span>`}</div>
+            <div class="anom-sub mono">baseline ${nf(a.baselineMean, 1)}${unit} · now ${nf(a.current, 1)}${unit}${a.baselineMinutes ? ` · ${nf(a.baselineMinutes)}m baseline` : ""}</div>
+          </div>
+          <div class="anom-z"><div class="anom-zv">${nf(Math.abs(a.zScore), 1)}σ</div><div class="faint">from baseline</div></div>
+        </div>`;
+      }).join("");
 
-  $$("#patternTable [data-p]").forEach(tr => tr.addEventListener("click", () => {
-    const p = pat.patterns[+tr.dataset.p];
-    // The template has masking tokens in it, so search on the most specific
-    // literal we have instead: an error code, else the event name.
-    const needle = (p.errorCodes && p.errorCodes[0]) || p.topEvent || "";
-    go("logs", { q: needle, service: (p.services || [])[0] || "", severity: "" });
-  }));
+  $("#patNote").textContent = `${nf(pat.total)} lines · ${nf(pat.distinctPatterns)} patterns`;
+  const table = (rows, empty) => {
+    if (!rows.length) return `<tbody><tr><td class="empty">${empty}</td></tr></tbody>`;
+    const max = Math.max(...rows.map(p => p.sharePct || 0), 0.0001);
+    return `<thead><tr><th>Pattern</th><th>Severity</th><th>Service</th><th class="right">Count</th>
+      <th>Share</th><th class="right">P95</th><th class="right">Last seen</th></tr></thead><tbody>` +
+      rows.map(p => {
+        const sev = (p.severity || "INFO").toUpperCase();
+        const tone = sev === "ERROR" || sev === "CRITICAL" ? "--err" : sev === "WARNING" ? "--warn" : "--text-faint";
+        const bar = sev === "ERROR" || sev === "CRITICAL" ? "--err" : "--accent";
+        return `<tr class="clickable" data-q="${esc((p.errorCodes || [])[0] || p.topEvent || "")}" data-svc="${esc((p.services || [])[0] || "")}">
+          <td class="pat-cell"><div class="mono pat-name">${esc(p.pattern)}</div><div class="mono faint pat-sub">${esc(p.topEvent || "")}</div></td>
+          <td><span class="sev-tag" style="--c:var(${tone})"><span class="dot"></span>${esc(sev)}</span></td>
+          <td class="mono">${esc((p.services || []).map(svcShort).join(", "))}</td>
+          <td class="num pat-count">${nf(p.count)}</td>
+          <td><div class="share"><span class="share-bar"><i style="width:${Math.max(3, (p.sharePct || 0) / max * 100).toFixed(1)}%;background:var(${bar})"></i></span><span class="faint">${nf(p.sharePct, 1)}%</span></div></td>
+          <td class="num">${p.p95LatencyMs == null ? "—" : nf(p.p95LatencyMs) + "ms"}</td>
+          <td class="num faint">${ago(p.lastSeen)}</td>
+        </tr>`;
+      }).join("") + `</tbody>`;
+  };
+  $("#failPatTable").innerHTML = table(failing.slice(0, 12), "No failure patterns in this window.");
+  // The API ranks failures first; this table is about volume, so rank by count.
+  $("#patternTable").innerHTML = table([...all].sort((a, b) => b.count - a.count).slice(0, 15), "No log lines in this window.");
+  $$("#failPatTable [data-q], #patternTable [data-q]").forEach(tr => tr.addEventListener("click", () =>
+    go("logs", { q: tr.dataset.q, service: tr.dataset.svc, severity: "" })));
+}
+
+/* ---------- performance ---------- */
+async function loadPerformance() {
+  const [pts, routes] = await Promise.all([
+    api(`/api/v1/metrics/series?window=${state.window}`),
+    api(`/api/v1/routes?window=${state.window}&limit=50`).catch(() => null),
+  ]);
+  const nowMin = Math.floor(Date.now() / 60000);
+  const points = complete(pts.points).filter(p => Math.floor(p.ts / 60) < nowMin);
+  const vals = k => points.map(p => p[k]).filter(v => v != null);
+  const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+  const p50 = median(vals("p50LatencyMs")), p95 = median(vals("p95LatencyMs"));
+  const p99max = vals("p99LatencyMs").length ? Math.max(...vals("p99LatencyMs")) : null;
+  const ms = v => v == null ? "—" : nf(v) + "<span class='kunit'>ms</span>";
+
+  $("#perfTiles").innerHTML = [
+    linkTile({ label: "P50 latency", value: ms(p50), spark: vals("p50LatencyMs"), sparkColor: "--s1", foot: "median minute", href: "#performance" }),
+    linkTile({ label: "P95 latency", value: ms(p95), valueColor: p95 > 500 ? "--warn" : null, spark: vals("p95LatencyMs"), sparkColor: "--s2", foot: "median minute", href: "#performance" }),
+    linkTile({ label: "P99 latency", value: ms(p99max), valueColor: p99max > 2000 ? "--err" : null, spark: vals("p99LatencyMs"), sparkColor: "--s3", foot: "worst minute", href: "#performance" }),
+    linkTile({ label: "Slow requests", value: routes ? nf(routes.slowRequests) : "—", foot: routes ? `over ${nf(routes.slowThresholdMs)}ms` : "route data unavailable", href: "#logs" }),
+  ].join("");
+
+  const labels = points.map(p => hhmm(p.ts));
+  const series = [["p50", "p50LatencyMs", "--s1"], ["p95", "p95LatencyMs", "--s2"], ["p99", "p99LatencyMs", "--s3"]];
+  upsert("perfLat", "chPerfLat", "line", {
+    labels, datasets: series.map(([n, k, c]) => ds(n, points.map(p => p[k]), css(c), false)),
+  }, { plugins: { legend: { display: false } }, scales: { y: { grid: { color: css("--border-soft") }, border: { display: false },
+       ticks: { color: css("--text-faint"), callback: v => v + "ms", maxTicksLimit: 6 }, beginAtZero: true } } });
+  $("#perfLatLegend").innerHTML = series.map(([n, , c]) => `<span><i style="background:var(${c})"></i>${n}</span>`).join("");
+
+  upsert("perfTp", "chPerfTp", "line", {
+    labels, datasets: [
+      ds("Requests", points.map(p => p.requests || 0), css("--s1"), true),
+      ds("Failures (4xx + 5xx)", points.map(p => (p.errors5xx || 0) + (p.errors4xx || 0)), css("--err"), false),
+    ],
+  }, { plugins: { legend: { display: false } } });
+  $("#perfTpLegend").innerHTML = `<span><i style="background:var(--s1)"></i>Requests</span><span><i style="background:var(--err)"></i>Failures</span>`;
+
+  const rows = (routes && routes.routes) || [];
+  $("#perfRoutesTitle").textContent = `All routes (${nf(routes ? routes.routeCount : 0)})`;
+  const max = Math.max(...rows.map(r => r.p95LatencyMs || 0), 1);
+  $("#perfRoutes").innerHTML = !rows.length
+    ? `<tbody><tr><td class="empty">No requests in this window.</td></tr></tbody>`
+    : `<thead><tr><th>Route</th><th>Service</th><th class="right">Requests</th><th class="right">Error rate</th><th>P95</th></tr></thead><tbody>` +
+      rows.map(r => `<tr class="clickable" data-q="${esc(r.route)}">
+        <td class="mono">${esc(r.route)}</td>
+        <td class="mono faint">${esc(svcShort(r.service))}</td>
+        <td class="num">${nf(r.count)}</td>
+        <td class="num" style="color:${r.errorRate > 0.02 ? "var(--err)" : "inherit"}">${pct(r.errorRate * 100, 1)}</td>
+        <td><div class="share"><span class="share-bar wide"><i style="width:${Math.max(3, (r.p95LatencyMs || 0) / max * 100).toFixed(1)}%;background:var(${(r.p95LatencyMs || 0) > 500 ? "--warn" : "--accent"})"></i></span>
+            <span class="num">${r.p95LatencyMs == null ? "—" : nf(r.p95LatencyMs) + "ms"}</span></div></td>
+      </tr>`).join("") + `</tbody>`;
+  $$("#perfRoutes [data-q]").forEach(tr => tr.addEventListener("click", () => go("logs", { q: tr.dataset.q })));
 }
 
 /* ---------- services ---------- */
@@ -1358,14 +1436,17 @@ async function loadIncidents() {
   const st = d.stats;
 
   $("#incTiles").innerHTML = [
-    tile("Breaching now", nf(st.breachingNow), "Thresholds currently crossed",
-         st.breachingNow ? "err" : "ok"),
-    tile("Resolved", nf(st.resolvedInWindow), "Stopped breaching during this window"),
-    tile("Total episodes", nf(st.totalEpisodes),
-         `Across ${nf(st.distinctIncidents)} distinct incident${st.distinctIncidents === 1 ? "" : "s"}`),
-    tile("Critical", nf(st.critical), "Highest-severity incidents",
-         st.critical ? "err" : "muted"),
+    linkTile({ label: "Breaching now", value: nf(st.breachingNow), valueColor: st.breachingNow ? "--err" : "--ok",
+               foot: "thresholds currently crossed", href: "#incidents" }),
+    linkTile({ label: "Resolved", value: nf(st.resolvedInWindow), foot: "stopped breaching in this window", href: "#incidents" }),
+    linkTile({ label: "Episodes", value: nf(st.totalEpisodes),
+               foot: `across ${nf(st.distinctIncidents)} distinct incident${st.distinctIncidents === 1 ? "" : "s"}`, href: "#incidents" }),
+    // The backend's "critical" count includes HIGH, so the label says so.
+    linkTile({ label: "High or critical", value: nf(st.critical), valueColor: st.critical ? "--err" : null,
+               foot: "top two severities", href: "#incidents" }),
   ].join("");
+  $("#incBreachChip").innerHTML = st.breachingNow ? chip(`${nf(st.breachingNow)} need someone`, "--err") : chip("All clear", "--ok");
+  $("#incResolvedChip").innerHTML = st.resolvedInWindow ? chip(`${nf(st.resolvedInWindow)} resolved`, "--text-faint") : "";
 
   // Say plainly which numbers are live and which are a day behind. A reader
   // who does not know the difference will trust the stale one.
@@ -1652,6 +1733,7 @@ async function refresh() {
     else if (state.view === "logs") { await loadLogsInitial(); await loadErrors(); }
     else if (state.view === "insights") await loadInsights();
     else if (state.view === "services") await loadServices();
+    else if (state.view === "performance") await loadPerformance();
     else if (state.view === "setup") { await loadProjects(); await loadSetup(); }
     else if (state.view === "resources") await loadResources();
     else if (state.view === "cost") await loadCost();

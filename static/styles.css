@@ -699,3 +699,36 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
 .setup-app .mono:first-child { font-size: 14px; font-weight: 600; }
 .setup-app .faint { font-size: 11px; }
 .setup-app:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+
+
+/* ---------- insights & performance ---------- */
+.ins-card { margin-top: 12px; }
+.card-row.pad { padding: 15px 16px 4px; }
+.ins-note { font-size: 12px; }
+.anom-row {
+  display: flex; align-items: center; gap: 16px; padding: 11px 14px; margin-top: 8px;
+  border: 1px solid var(--border-soft); border-left: 3px solid var(--tone); border-radius: 8px; background: var(--bg-elev2);
+}
+.anom-text { flex: 1; min-width: 0; }
+.anom-title { font-size: 13.5px; font-weight: 550; }
+.anom-sub { font-size: 11.5px; color: var(--text-dim); margin-top: 3px; }
+.anom-z { text-align: right; flex: none; }
+.anom-zv { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.anom-z .faint { font-size: 11px; }
+.pat-table th { padding: 10px 16px; font-size: 11px; color: var(--text-faint); letter-spacing: .6px; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid var(--border); }
+.pat-table td { padding: 10px 16px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+.pat-table tbody tr:last-child td { border-bottom: 0; }
+.pat-table tbody tr:hover { background: var(--bg-elev2); }
+.pat-cell { max-width: 460px; }
+.pat-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pat-sub { font-size: 11px; margin-top: 2px; }
+.pat-count { font-weight: 650; font-size: 14px; }
+.share { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.share-bar { display: block; width: 84px; height: 5px; border-radius: 3px; background: var(--bg-elev2); overflow: hidden; flex: none; }
+.share-bar.wide { width: 160px; }
+.share-bar i { display: block; height: 100%; border-radius: 3px; }
+.inc-legend { margin: 10px 0 0; }
+#rootCauseBanner:not(:empty) { margin-top: 12px; }
+
+.inc-list > .empty { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); }
+.inc-list > .inc-row { margin-top: 0; margin-bottom: 10px; }
