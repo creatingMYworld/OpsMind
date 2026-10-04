@@ -331,3 +331,73 @@ pre.json {
   letter-spacing: .07em; color: var(--text-dim); font-weight: 600;
 }
 .inc-detail h5:first-child { margin-top: 0; }
+
+
+/* ---------- rail (Vantage-style) ---------- */
+.brand { padding: 16px 16px 14px; }
+.brand-link { display: flex; align-items: center; gap: 10px; color: var(--text); }
+.brand-mark {
+  width: 32px; height: 32px; border-radius: 8px; flex: none;
+  display: grid; place-items: center;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.brand-name { display: block; font-size: 16px; font-weight: 650; letter-spacing: -.2px; line-height: 1.15; }
+.brand-sub { display: block; font-size: 11px; color: var(--text-faint); line-height: 1.2; }
+.brand-project { margin-top: 10px; font-size: 11px; color: var(--text-faint); }
+.nav button { position: relative; gap: 11px; padding: 9px 12px; font-size: 14px; }
+.nav button .nico { flex: none; opacity: .85; }
+.nav button.active .nico { opacity: 1; color: var(--accent); }
+.nav button.active { font-weight: 600; }
+.nav button.active::before {
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+  border-radius: 2px; background: var(--accent);
+}
+.nav .badge {
+  margin-left: auto; min-width: 20px; padding: 0 6px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+  color: var(--err); background: color-mix(in srgb, var(--err) 16%, transparent);
+}
+
+/* ---------- section labels ---------- */
+.sub-head { margin: 26px 0 4px; font-size: 16px; letter-spacing: -.2px; scroll-margin-top: 70px; }
+.eyebrow-label {
+  margin: 4px 0 10px; color: var(--text-faint); font-size: 11.5px; font-weight: 650;
+  text-transform: uppercase; letter-spacing: .7px;
+}
+
+/* ---------- overview status strip ---------- */
+.strip {
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); margin-bottom: 14px; overflow: hidden;
+}
+.strip:empty { display: none; }
+.strip-head {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  padding: 12px 18px; border-bottom: 1px solid var(--border);
+}
+.strip-name { font-size: 15px; font-weight: 650; }
+.strip-meta { font-size: 12px; color: var(--text-dim); }
+.strip-fresh { margin-left: auto; font-size: 12px; color: var(--text-faint); }
+.strip-row { display: grid; grid-template-columns: 1.35fr repeat(4, 1fr); }
+.strip-cell { padding: 14px 18px; border-left: 1px solid var(--border); min-width: 0; }
+.strip-cell:first-child { border-left: 0; }
+.strip-lead { position: relative; padding-left: 30px; }
+.strip-lead::before {
+  content: ""; position: absolute; left: 16px; top: 18px; bottom: 18px; width: 3px;
+  border-radius: 2px; background: var(--lead);
+}
+.strip-label { color: var(--text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; }
+.strip-value { font-size: 26px; font-weight: 700; letter-spacing: -.6px; margin: 4px 0 2px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.strip-sub { color: var(--text-faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1100px) {
+  .strip-row { grid-template-columns: repeat(3, 1fr); }
+  .strip-cell:nth-child(4) { border-left: 0; }
+  .strip-cell:nth-child(n+4) { border-top: 1px solid var(--border); }
+}
+@media (max-width: 640px) {
+  .strip-row { grid-template-columns: 1fr 1fr; }
+  .strip-cell { border-left: 0; border-top: 1px solid var(--border); }
+  .strip-lead { grid-column: 1 / -1; border-top: 0; }
+}

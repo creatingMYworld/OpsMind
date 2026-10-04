@@ -95,8 +95,11 @@ function go(view, params = {}) { location.hash = buildHash(view, params); }
 
 function applyRoute() {
   const { view, params } = parseHash();
-  const known = $("#view-" + view);
-  state.view = known ? view : "overview";
+  // Errors now live inside Logs, and Projects inside Setup. Old links still land.
+  const ALIAS = { errors: "logs", projects: "setup" };
+  const target = ALIAS[view] || view;
+  const known = $("#view-" + target);
+  state.view = known ? target : "overview";
   state.params = params;
 
   $$("#nav button").forEach(x => x.classList.toggle("active", x.dataset.view === state.view));
@@ -184,6 +187,47 @@ function setHealthPill(h) {
   return cls;   // the hero tile is coloured to match
 }
 
+/* ---------- overview: status strip ----------
+   Project identity on one row, then the five numbers that say whether it is
+   healthy. Same shape in every cell: name, value, qualifier. */
+function renderStatusStrip(o, cls) {
+  const m = state.meta ? state.meta.config : {};
+  const h = o.health, t = o.technical, a = o.actions || { firingNow: 0, total: 0 };
+  const svcs = o.services || [];
+  const healthy = svcs.filter(s => !(s.errorRate > 0.01 || (s.p95LatencyMs || 0) > 2000)).length;
+  const hasTraffic = t.requests > 0;
+  const tone = { ok: "--ok", warn: "--warn", err: "--err", crit: "--crit" }[cls] || "--text-faint";
+  const word = { HEALTHY: "Healthy", DEGRADED: "Degraded", IMPAIRED: "Impaired", CRITICAL: "Critical" }[h.status] || h.status;
+  const project = m.activeProject || m.projectId || "Local";
+  const meta = [m.dataSource === "gcp" ? "Google Cloud" : "local ingest", m.region].filter(Boolean).join(" · ");
+
+  const cell = (label, value, sub, color) =>
+    `<div class="strip-cell"><div class="strip-label">${label}</div>` +
+    `<div class="strip-value"${color ? ` style="color:var(${color})"` : ""}>${value}</div>` +
+    `<div class="strip-sub">${sub}</div></div>`;
+
+  $("#statusStrip").innerHTML =
+    `<div class="strip-head">
+       <span class="strip-name">${esc(project)}</span>
+       <span class="strip-meta mono">${esc(meta)}</span>
+       <span class="strip-fresh">live · ${state.window}-minute window</span>
+     </div>
+     <div class="strip-row">
+       <div class="strip-cell strip-lead" style="--lead:var(${tone})">
+         <div class="strip-label">Overall health</div>
+         <div class="strip-value" style="color:var(${tone})">${esc(word)}</div>
+         <div class="strip-sub">${nf(t.requests)} req · ${nf(t.requestsPerMin, 1)}/min · ${nf(t.servicesReporting)} services</div>
+       </div>
+       ${cell("Services", svcs.length ? `${healthy}/${svcs.length}` : "—", svcs.length ? "healthy" : "none reporting",
+              !svcs.length ? null : healthy === svcs.length ? "--ok" : "--warn")}
+       ${cell("Fix now", nf(a.firingNow), `of ${nf(a.total)} open`, a.firingNow ? "--err" : "--ok")}
+       ${cell("Availability", hasTraffic ? pct(100 - t.errorRatePct, 2) : "—", hasTraffic ? "requests without a 5xx" : "no traffic yet",
+              !hasTraffic ? null : t.errorRatePct > 1 ? "--err" : "--ok")}
+       ${cell("P95", t.worstServiceP95Ms == null ? "—" : nf(t.worstServiceP95Ms) + "ms", "worst service",
+              (t.worstServiceP95Ms || 0) > 2000 ? "--warn" : null)}
+     </div>`;
+}
+
 /* ---------- overview ---------- */
 async function loadOverview() {
   const [o, f] = await Promise.all([
@@ -193,6 +237,7 @@ async function loadOverview() {
   const h = o.health, t = o.technical, b = o.business, c = o.cost;
 
   const cls = setHealthPill(h);
+  renderStatusStrip(o, cls);
 
   $("#heroTiles").innerHTML = [
     tile("System health", nf(h.score, 1), `${esc(h.status)} · ${h.penalties.length} penalty factor(s)`, cls, "heart", "err"),
@@ -300,6 +345,25 @@ function ico(name, tint) {
   return `<span class="ico" style="--ico:var(${TINT[tint] || "--accent"})" aria-hidden="true">` +
     `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg></span>`;
 }
+const NAV_ICONS = {
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  alert: '<path d="m10.3 3.9-8.2 14A2 2 0 0 0 3.8 21h16.4a2 2 0 0 0 1.7-3.1l-8.2-14a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/>',
+  sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8Z"/>',
+  layers: '<path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+  scroll: '<path d="M8 21h11a2 2 0 0 0 2-2v-1H10v1a2 2 0 1 1-4 0V5a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2h4"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M10 8h6M10 12h6"/>',
+  cpu: '<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
+  banknote: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
+  bell: '<path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/>',
+  settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'
+};
+function decorateNav() {
+  $$("#nav button[data-nicon]:not([data-iconized])").forEach(b => {
+    b.insertAdjacentHTML("afterbegin",
+      `<svg class="nico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[b.dataset.nicon] || ""}</svg>`);
+    b.dataset.iconized = "1";
+  });
+}
+
 // Static card headings opt in with data-icon / data-tint in index.html.
 function decorateHeadings(root = document) {
   root.querySelectorAll("h3[data-icon]:not([data-iconized])").forEach(h => {
@@ -1217,13 +1281,11 @@ async function refresh() {
       $("#logSvc").innerHTML = `<option value="">all services</option>` +
         s.services.map(x => `<option value="${esc(x.service)}">${esc(x.service)}</option>`).join("");
     }
-    if (state.view === "projects") await loadProjects();
-    else if (state.view === "overview") await loadOverview();
-    else if (state.view === "logs") await loadLogsInitial();
+    if (state.view === "overview") await loadOverview();
+    else if (state.view === "logs") { await loadLogsInitial(); await loadErrors(); }
     else if (state.view === "insights") await loadInsights();
     else if (state.view === "services") await loadServices();
-    else if (state.view === "setup") await loadSetup();
-    else if (state.view === "errors") await loadErrors();
+    else if (state.view === "setup") { await loadProjects(); await loadSetup(); }
     else if (state.view === "resources") await loadResources();
     else if (state.view === "cost") await loadCost();
     else if (state.view === "alerts") await loadAlerts();
@@ -1243,6 +1305,7 @@ async function refresh() {
 }
 
 (async function init() {
+  decorateNav();
   decorateHeadings();
   startStream();
   applyRoute();          // reads the hash, sets the view, starts the timer
