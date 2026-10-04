@@ -195,14 +195,14 @@ async function loadOverview() {
   const cls = setHealthPill(h);
 
   $("#heroTiles").innerHTML = [
-    tile("System health", nf(h.score, 1), `${esc(h.status)} · ${h.penalties.length} penalty factor(s)`, cls),
+    tile("System health", nf(h.score, 1), `${esc(h.status)} · ${h.penalties.length} penalty factor(s)`, cls, "heart", "err"),
     tile("Traffic", nf(t.requestsPerMin, 1) + "<span class='faint' style='font-size:14px'> /min</span>",
-         `${nf(t.requests)} requests · ${pct(t.errorRatePct, 2)} 5xx · ${nf(t.errors4xx)} 4xx`),
+         `${nf(t.requests)} requests · ${pct(t.errorRatePct, 2)} 5xx · ${nf(t.errors4xx)} 4xx`, null, "activity", "accent"),
     tile("Checkout success", b.checkoutSuccessRatePct === null ? "—" : pct(b.checkoutSuccessRatePct),
          `${nf(b.checkoutsConfirmed)} paid · ${inr(b.revenueAtRiskInr)} at risk`,
-         b.checkoutSuccessRatePct === null ? "muted" : b.checkoutSuccessRatePct >= 90 ? "ok" : b.checkoutSuccessRatePct >= 75 ? "warn" : "err"),
+         b.checkoutSuccessRatePct === null ? "muted" : b.checkoutSuccessRatePct >= 90 ? "ok" : b.checkoutSuccessRatePct >= 75 ? "warn" : "err", "cart", "ok"),
     tile("Modeled spend", usd(c.usdPerHour, 4) + "<span class='faint' style='font-size:14px'>/hr</span>",
-         `${usd(c.projectedUsdPerMonth, 2)}/mo at this rate · modeled`, "cost"),
+         `${usd(c.projectedUsdPerMonth, 2)}/mo at this rate · modeled`, "cost", "coins", "cost"),
   ].join("");
 
   const pts = await api(`/api/v1/metrics/series?window=${state.window}`);
@@ -279,9 +279,40 @@ function renderActions(q) {
   }));
 }
 
-function tile(label, value, foot, cls) {
+/* ---------- tile icons ----------
+   One stroke icon set (24px grid, 2px stroke) in a tinted square, as the
+   header of every Overview tile and card. Tint comes from the existing
+   colour tokens, so no new colours are introduced. */
+const ICONS = {
+  heart: '<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"/>',
+  activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  cart: '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2 2h3l2.7 12.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>',
+  coins: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+  bars: '<path d="M3 3v18h18"/><path d="M8 17v-4"/><path d="M13 17V8"/><path d="M18 17v-7"/>',
+  nodes: '<circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><path d="m10.5 7.6-4 8.8M13.5 7.6l4 8.8M8 19h8"/>',
+  funnel: '<path d="M3 4h18l-7 8.5V19l-4 2v-8.5Z"/>',
+  alert: '<path d="m10.3 3.9-8.2 14A2 2 0 0 0 3.8 21h16.4a2 2 0 0 0 1.7-3.1l-8.2-14a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/>',
+  bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9Z"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.5"/>'
+};
+const TINT = { ok: "--ok", warn: "--warn", err: "--err", crit: "--crit", cost: "--cost", accent: "--accent", info: "--info", money: "--money" };
+function ico(name, tint) {
+  return `<span class="ico" style="--ico:var(${TINT[tint] || "--accent"})" aria-hidden="true">` +
+    `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg></span>`;
+}
+// Static card headings opt in with data-icon / data-tint in index.html.
+function decorateHeadings(root = document) {
+  root.querySelectorAll("h3[data-icon]:not([data-iconized])").forEach(h => {
+    h.insertAdjacentHTML("afterbegin", ico(h.dataset.icon, h.dataset.tint));
+    h.classList.add("with-ico");
+    h.dataset.iconized = "1";
+  });
+}
+
+function tile(label, value, foot, cls, icon, tint) {
   const color = cls ? ({ ok: "--ok", warn: "--warn", err: "--err", crit: "--crit", cost: "--cost" }[cls]) : null;
-  return `<div class="card tile"><div class="label">${esc(label)}</div>
+  return `<div class="card tile">
+    <div class="tile-head">${icon ? ico(icon, tint || cls) : ""}<div class="label">${esc(label)}</div></div>
     <div class="value"${color ? ` style="color:var(${color})"` : ""}>${value}</div>
     <div class="foot">${foot}</div></div>`;
 }
@@ -1212,6 +1243,7 @@ async function refresh() {
 }
 
 (async function init() {
+  decorateHeadings();
   startStream();
   applyRoute();          // reads the hash, sets the view, starts the timer
 })();
