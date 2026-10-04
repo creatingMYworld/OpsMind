@@ -901,3 +901,13 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
 .explain-tags { display: flex; gap: 7px; margin-bottom: 9px; flex-wrap: wrap; }
 @media (max-width: 1000px) { .ev-grid { grid-template-columns: minmax(0, 1fr); } }
 .ev + .ev { margin-top: 18px; }
+
+/* Recommendation cards open on click (native <details>). */
+.rec-card summary { list-style: none; cursor: pointer; }
+.rec-card summary::-webkit-details-marker { display: none; }
+.rec-card .rec-save { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 0; }
+.rec-more { font-size: 12px; display: inline-flex; align-items: center; gap: 5px; }
+.rec-more::after { content: "▾"; transition: transform .15s; }
+.rec-card[open] .rec-more::after { transform: rotate(180deg); }
+.rec-card[open] summary { margin-bottom: 10px; }
+.opt-recs { align-items: start; }

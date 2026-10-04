@@ -294,6 +294,8 @@ def logs(
     service: Optional[str] = None,
     q: Optional[str] = None,
     event: Optional[str] = None,
+    status: Optional[int] = Query(None, ge=1, le=5),
+    route: Optional[str] = None,
     errorCode: Optional[str] = None,
     trace: Optional[str] = None,
     sinceS: Optional[int] = Query(None, ge=1, le=86400),
@@ -302,7 +304,8 @@ def logs(
     services = [s for s in (service or "").split(",") if s.strip()] or None
     result = store.logs(
         limit=limit, offset=offset, min_severity=severity, services=services,
-        q=q, event=event, error_code=errorCode, trace=trace,
+        q=q, event=event, status_class=status, route=route,
+        error_code=errorCode, trace=trace,
         since=(time.time() - sinceS) if sinceS else None,
         include_heartbeats=includeHeartbeats,
     )
@@ -317,6 +320,9 @@ async def logs_stream(
     severity: Optional[str] = None,
     service: Optional[str] = None,
     q: Optional[str] = None,
+    event: Optional[str] = None,
+    status: Optional[int] = Query(None, ge=1, le=5),
+    route: Optional[str] = None,
 ) -> StreamingResponse:
     """Server-Sent Events: new log lines pushed as they arrive.
 
@@ -334,7 +340,8 @@ async def logs_stream(
             if await request.is_disconnected():
                 break
             batch = store.logs(limit=80, min_severity=severity,
-                               services=services, q=q, since=cursor)
+                               services=services, q=q, event=event,
+                               status_class=status, route=route, since=cursor)
             entries = list(reversed(batch["entries"]))  # oldest first
             if entries:
                 cursor = max(e["ts"] for e in entries) + 1e-6

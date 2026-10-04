@@ -9,7 +9,7 @@ const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const state = {
   view: "overview", window: 15, params: {}, paused: false, logs: [], maxLogs: 1200,
-  services: [], es: null, meta: null, charts: {}, incidents: [], scenarios: [],
+  services: [], es: null, meta: null, charts: {}, incidents: [], scenarios: [], knownEvents: new Set(),
 };
 
 /* ---------- helpers ---------- */
@@ -141,11 +141,12 @@ function applyRoute() {
 
   // A drill-down carries its filters; adopt them before the view renders.
   if (state.view === "logs") {
-    if (params.severity !== undefined) $("#logSev").value = params.severity;
-    if (params.service !== undefined) $("#logSvc").value = params.service;
+    if (params.severity !== undefined) setSel($("#logSev"), params.severity);
+    if (params.service !== undefined) setSel($("#logSvc"), params.service);
     if (params.q !== undefined) $("#logQ").value = params.q;
-    if (params.status !== undefined) $("#logStatus").value = params.status;
-    if (params.route !== undefined) $("#logRoute").value = params.route;
+    if (params.status !== undefined) setSel($("#logStatus"), params.status);
+    if (params.route !== undefined) setSel($("#logRoute"), params.route);
+    if (params.event !== undefined) setSel($("#logEvent"), params.event);
     state.logs = [];
     startStream();
   }
@@ -846,14 +847,25 @@ function recCard(r) {
 
 /* ---------- logs (SSE) ---------- */
 function sevOrder(s) { return { DEBUG: 0, INFO: 1, WARNING: 2, ERROR: 3, CRITICAL: 4 }[s] ?? 1; }
-const statusClass = s => s == null ? "" : String(Math.floor(s / 100));
-function logMatchesLocal(e) {
-  // Status and route are filtered here; the API filters severity, service,
-  // event and search. Both views run on the same buffer.
-  const st = $("#logStatus").value, rt = $("#logRoute").value;
-  if (st && statusClass(e.httpStatus) !== st) return false;
-  if (rt && e.route !== rt) return false;
-  return true;
+/* Every filter goes to the server, for the list and the live stream alike,
+   so the count, the rows and the stream always agree. */
+function logParams() {
+  const p = new URLSearchParams();
+  const set = (k, v) => { if (v) p.set(k, v); };
+  set("severity", $("#logSev").value);
+  set("service", $("#logSvc").value);
+  set("q", $("#logQ").value.trim());
+  set("event", $("#logEvent").value);
+  set("status", $("#logStatus").value);
+  set("route", $("#logRoute").value);
+  return p;
+}
+/* Select a value even when its option has not been loaded yet (a drill-down
+   link can arrive before the choices do); setting .value alone would
+   silently fall back to "All". */
+function setSel(sel, v) {
+  if (v && ![...sel.options].some(o => o.value === v)) sel.add(new Option(v, v));
+  sel.value = v || "";
 }
 function logRow(e) {
   const s = e.httpStatus;
@@ -870,7 +882,7 @@ function logRow(e) {
 const sevVar = s => ({ ERROR: "--err", CRITICAL: "--err", WARNING: "--warn" }[s] || "--text-faint");
 function renderLogs() {
   // Newest first: the initial fetch and the stream arrive in ingest order.
-  const rows = state.logs.filter(logMatchesLocal).sort((a, b) => b.ts - a.ts);
+  const rows = state.logs.slice().sort((a, b) => b.ts - a.ts);
   const body = $("#logBody");
   body.innerHTML = rows.length
     ? rows.slice(0, 300).map(logRow).join("")
@@ -881,13 +893,7 @@ function renderLogs() {
 }
 function startStream() {
   if (state.es) state.es.close();
-  const sev = $("#logSev").value, svc = $("#logSvc").value, q = $("#logQ").value.trim(), ev = $("#logEvent").value;
-  const p = new URLSearchParams();
-  if (sev) p.set("severity", sev);
-  if (svc) p.set("service", svc);
-  if (q) p.set("q", q);
-  if (ev) p.set("event", ev);
-  const es = new EventSource("/api/v1/logs/stream?" + p.toString());
+  const es = new EventSource("/api/v1/logs/stream?" + logParams().toString());
   state.es = es;
   es.addEventListener("logs", e => {
     if (state.paused) return;
@@ -915,12 +921,9 @@ $("#logPause").addEventListener("click", () => {
 const errorFilterOn = () => ["ERROR", "CRITICAL"].includes($("#logSev").value) || $("#logStatus").value === "5";
 
 async function loadLogsInitial() {
-  const sev = $("#logSev").value, svc = $("#logSvc").value, q = $("#logQ").value.trim(), ev = $("#logEvent").value;
-  const p = new URLSearchParams({ limit: "500", sinceS: String(state.window * 60) });
-  if (sev) p.set("severity", sev);
-  if (svc) p.set("service", svc);
-  if (q) p.set("q", q);
-  if (ev) p.set("event", ev);
+  const sev = $("#logSev").value, svc = $("#logSvc").value;
+  const p = logParams();
+  p.set("limit", "500"); p.set("sinceS", String(state.window * 60));
   const [r, pts, routes] = await Promise.all([
     api("/api/v1/logs?" + p.toString()),
     api(`/api/v1/metrics/series?window=${state.window}${svc ? "&service=" + encodeURIComponent(svc) : ""}`),
@@ -934,7 +937,8 @@ async function loadLogsInitial() {
     sel.innerHTML = `<option value="">All</option>` + values.map(v => `<option${v === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
   };
   keep($("#logRoute"), [...new Set((routes ? routes.routes : []).map(x => x.route))].sort());
-  keep($("#logEvent"), [...new Set(r.entries.map(x => x.event).filter(Boolean)).add(ev)].filter(Boolean).sort());
+  r.entries.forEach(x => x.event && state.knownEvents.add(x.event));
+  keep($("#logEvent"), [...state.knownEvents].sort());
   renderLogs();
 
   // Matching volume: severities at or above the chosen one.
@@ -1572,16 +1576,22 @@ function renderOptimization(recs) {
 
   $("#recHint").textContent = `${recs.note} Google Recommender: ${recs.googleRecommender.reason}`;
 
+  // Live refresh re-renders the list; remember which cards the reader opened.
+  const opened = new Set($$("#recs details[open]").map(d => d.dataset.id));
   $("#recs").innerHTML = list.length === 0
     ? `<div class="card"><div class="empty">No recommendation applies to this window.</div></div>`
-    : list.map(r => `<div class="card rec-card ${esc(r.severity)}">
-        <div class="rec-head">
-          <div class="rec-title">${esc(r.title)}</div>
-          <span class="pill ${r.severity === "HIGH" ? "err" : r.severity === "MEDIUM" ? "warn" : "muted"}">${esc(r.severity)}</span>
-        </div>
-        <div class="rec-save">${r.estimatedSavingUsdPerMonth !== null
-          ? `<span class="saving">${usd(r.estimatedSavingUsdPerMonth, 4)}<span class="faint">/mo</span></span>`
-          : `<span class="saving none">${esc(r.savingStatus)}</span>`}</div>
+    // Closed, a card is title, severity and saving; the evidence opens on click.
+    : list.map(r => `<details class="card rec-card ${esc(r.severity)}" data-id="${esc(r.id)}"${opened.has(r.id) ? " open" : ""}>
+        <summary>
+          <div class="rec-head">
+            <div class="rec-title">${esc(r.title)}</div>
+            <span class="pill ${r.severity === "HIGH" ? "err" : r.severity === "MEDIUM" ? "warn" : "muted"}">${esc(r.severity)}</span>
+          </div>
+          <div class="rec-save">${r.estimatedSavingUsdPerMonth !== null
+            ? `<span class="saving">${usd(r.estimatedSavingUsdPerMonth, 4)}<span class="faint">/mo</span></span>`
+            : `<span class="saving none">${esc(r.savingStatus)}</span>`}
+            <span class="rec-more faint">Details</span></div>
+        </summary>
         <div class="rec-body">${esc(r.recommendation)}</div>
         <div class="rec-body faint">${esc(r.rationale)}</div>
         <div class="rec-facts">
@@ -1591,7 +1601,7 @@ function renderOptimization(recs) {
           ${fact("Source", esc(r.provenance))}
           ${r.savingBasis ? fact("Saving basis", esc(r.savingBasis)) : ""}
         </div>
-        <code>${esc(r.suggestedAction)}</code></div>`).join("");
+        <code>${esc(r.suggestedAction)}</code></details>`).join("");
 
   // The summary is written last and separately: a slow or absent model must
   // never hold up the numbers above it.
@@ -2006,8 +2016,10 @@ async function refresh() {
     await loadMeta();
     if (!$("#logSvc").options.length || $("#logSvc").options.length === 1) {
       const s = await api("/api/v1/services?window=60");
+      const cur = $("#logSvc").value;
       $("#logSvc").innerHTML = `<option value="">All</option>` +
         s.services.map(x => `<option value="${esc(x.service)}">${esc(svcShort(x.service))}</option>`).join("");
+      setSel($("#logSvc"), cur);
     }
     if (state.view === "overview") await loadOverview();
     else if (state.view === "logs") { await loadLogsInitial(); await loadErrors(); }

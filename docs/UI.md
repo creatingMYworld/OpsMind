@@ -56,9 +56,12 @@ chosen.
   4xx counts, top failure, route chips. OpsMind has no Apdex, so CPU takes
   that slot.
 - **Logs**: one filter row (Search, Severity, Service, Status, Route, Event,
-  match count, pause), a matching-volume chart, then the table. Severity,
-  service, event and search are filtered by the API; status and route on the
-  client. Choosing ERROR/CRITICAL or 5xx shows **Error details** (tiles and
+  match count, pause), a matching-volume chart, then the table. Every filter
+  is applied by the API (`/api/v1/logs` and `/api/v1/logs/stream` take the
+  same `severity`, `service`, `q`, `event`, `status`, `route`), so the count,
+  the rows and the live stream agree. Severity means "this level and worse",
+  labelled `WARNING +`. Event choices accumulate rather than shrinking to the
+  selected one. Choosing ERROR/CRITICAL or 5xx shows **Error details** (tiles and
   error groups for the selected service) above the matching error logs. Rows
   are newest first; clicking one opens the entry and its trace.
 - **Insights**: anomalies (each with a likely cause: the most frequent error
@@ -140,7 +143,8 @@ Done in this pass:
 2. **Cost, Optimization Center**: lifted out of its card into its own section
    -- three summary tiles (calculated savings, open recommendations, high
    severity), a written **Summary**, then one card per recommendation in a
-   two-column grid with its saving, evidence and command. The summary comes
+   two-column grid, closed to title, severity and saving until clicked
+   (native `<details>`, kept open across live refresh) with its saving, evidence and command. The summary comes
    from `GET /api/v1/cost/summary`, which asks Gemini when `AI_ENABLED=true`
    and otherwise returns the same numbers summarised deterministically. The
    response carries `ai: true|false`, and only `ai: true` text is tagged

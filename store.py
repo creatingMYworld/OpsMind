@@ -344,6 +344,8 @@ class Store:
         services: Optional[List[str]] = None,
         q: Optional[str] = None,
         event: Optional[str] = None,
+        status_class: Optional[int] = None,
+        route: Optional[str] = None,
         error_code: Optional[str] = None,
         trace: Optional[str] = None,
         since: Optional[float] = None,
@@ -364,6 +366,11 @@ class Store:
             if svc and rec.service not in svc:
                 continue
             if event and rec.event != event:
+                continue
+            if status_class is not None and (rec.httpStatus is None
+                                             or int(rec.httpStatus) // 100 != status_class):
+                continue
+            if route and rec.route != route:
                 continue
             if error_code and rec.errorCode != error_code:
                 continue
