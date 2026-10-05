@@ -88,8 +88,13 @@ _started_at = time.time()
 # the /api/v1/auth/ endpoints are open, because they are how a person gets in;
 # each endpoint checks for itself what it needs.
 TOKEN_COOKIE = "opsmind_token"
+# The product pages carry no telemetry -- they are marketing copy, and the one
+# dynamic call on the landing page (/api/v1/meta) stays gated and fails closed,
+# keeping its static text. Leaving them shut made the logo on /signin a dead
+# loop: it links to /, which bounced straight back to /signin. The dashboard
+# and the whole API are unaffected.
 _OPEN_PATHS = ("/healthz", "/readyz", "/internal/ingest", "/favicon.ico",
-               "/signin", "/signup")
+               "/signin", "/signup", "/", "/about", "/how-it-works")
 _OPEN_PREFIXES = ("/static/", "/api/v1/auth/")
 
 
