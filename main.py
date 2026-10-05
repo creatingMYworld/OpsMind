@@ -778,8 +778,23 @@ def cost_freetier(window: int = Query(30, ge=1, le=180)) -> Dict[str, Any]:
 
 
 @app.get("/api/v1/cost/billed")
-def cost_billed() -> Dict[str, Any]:
-    return cost_engine.billed_status()
+def cost_billed(days: int = Query(7, ge=1, le=60)) -> Dict[str, Any]:
+    return cost_engine.billed_status(days=days)
+
+
+@app.get("/api/v1/cost/reconcile")
+def cost_reconcile(days: int = Query(7, ge=1, le=60),
+                   window: int = Query(60, ge=1, le=180)) -> Dict[str, Any]:
+    """Modeled cost checked against Google's own billing export.
+
+    Answers the obvious question about a modeled number -- is it right? --
+    with a figure rather than an assurance, and says why it cannot when there
+    is no billed data to check against.
+    """
+    from .collectors import gcp_billing
+
+    rate = cost_engine.rate(store, window_minutes=window)
+    return gcp_billing.reconcile(rate.get("usdPerHour"), days=days)
 
 
 @app.get("/api/v1/cost/summary")

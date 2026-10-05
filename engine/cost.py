@@ -254,36 +254,24 @@ def free_tier_position(store, window_minutes: int = 60) -> Dict[str, Any]:
     }
 
 
-def billed_status() -> Dict[str, Any]:
+def billed_status(days: int = 7) -> Dict[str, Any]:
     """The authoritative (billed) tier.
 
-    Cloud Billing export to BigQuery is deliberately NOT wired up for the
-    one-day build: on a project created today it would contain zero rows, and
-    showing an empty panel labelled "actual cost" is worse than showing why it
-    is empty. This reports the real latency characteristics instead, which is
-    the honest answer and demonstrates the three-tier model.
+    Reads Cloud Billing export from BigQuery when a dataset is configured, and
+    otherwise explains why the tier is empty. The three states it can be in --
+    not configured, configured but not yet populated, populated -- are each
+    reported as themselves. For roughly a day after enabling the export the
+    honest answer is "the table exists and is empty", which is more useful
+    than an error and much more useful than a fabricated number.
     """
-    return {
-        "tier": "AUTHORITATIVE",
-        "kind": "billed",
-        "available": False,
-        "reason": (
-            "Cloud Billing export to BigQuery is not configured for this "
-            "prototype. Billing export lands with roughly 24 hours of latency "
-            "and no delivery guarantee, so on a project created today it would "
-            "contain no rows."
-        ),
-        "latencyCharacteristics": (
-            "Exported multiple times per day; cost details typically available "
-            "within a day, sometimes longer. Never real-time."
-        ),
-        "howToEnable": "docs/DEPLOY.md step 11 (optional, post-hackathon)",
-        "reconciliationPlan": (
-            "Once export exists, compare modeled cost against billed cost for "
-            "the same window daily and publish the variance as an accuracy "
-            "figure next to the live number."
-        ),
-    }
+    from ..collectors import gcp_billing
+
+    out = gcp_billing.status(days=days)
+    out.setdefault("reconciliationPlan", (
+        "Once rows exist, modeled cost is compared against billed cost over "
+        "the same window and the variance is published as an accuracy figure "
+        "beside the live number."))
+    return out
 
 
 def incident_delta(store, incident_start: float,

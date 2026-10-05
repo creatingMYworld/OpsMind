@@ -125,6 +125,14 @@ class Settings:
         self.history_tz_offset_minutes: int = _env_int(
             "HISTORY_TZ_OFFSET_MINUTES", 330)
 
+        # The authoritative cost tier: Cloud Billing export in BigQuery.
+        # Set the dataset once the export is actually writing; the table name
+        # carries the billing account id and is discovered rather than typed.
+        self.billing_export_dataset: str = _env("BILLING_EXPORT_DATASET", "")
+        self.billing_export_table: str = _env("BILLING_EXPORT_TABLE", "")
+        self.billing_query_timeout_s: float = _env_float(
+            "BILLING_QUERY_TIMEOUT_S", 25.0)
+
         # Optional shared-secret gate for the dashboard. The platform holds
         # read access to your logs, so do not leave it open on a public URL
         # without this set. See docs/DEPLOY.md step 8.
@@ -185,6 +193,7 @@ class Settings:
             "logsPollIntervalS": self.logs_poll_interval_s,
             "metricsPollIntervalS": self.metrics_poll_interval_s,
             "historyEnabled": self.history_enabled,
+            "billingExportDataset": self.billing_export_dataset or None,
             "accountsBackend": self.accounts_backend,
         }
 

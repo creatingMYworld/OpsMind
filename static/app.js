@@ -625,6 +625,23 @@ async function loadHistory() {
     `</tbody>`;
 }
 
+/* Modeled cost checked against Google's invoice. Shown only when there is
+   billed data to check against -- an accuracy claim with nothing behind it
+   would be worse than no claim. */
+async function loadReconcile() {
+  const el = $("#billed");
+  if (!el) return;
+  try {
+    const r = await api("/api/v1/cost/reconcile");
+    if (r.accuracyPct === null || r.accuracyPct === undefined) return;
+    const d = document.createElement("div");
+    d.style.cssText = "margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px";
+    d.innerHTML = `<div style="font-size:13px"><strong>Modeled cost is ${r.accuracyPct}% accurate</strong> against billed, over ${r.windowDays} days.</div>
+      <div class="faint" style="font-size:11.5px;margin-top:4px">${esc(r.caveat || "")}</div>`;
+    el.appendChild(d);
+  } catch (e) { /* the billed panel stands on its own */ }
+}
+
 async function loadOverview() {
   const [o, f] = await Promise.all([
     api(`/api/v1/overview?window=${state.window}`),
@@ -1616,6 +1633,20 @@ async function loadCost() {
     </div>`;
   }).join("") + `<div class="pill ${ft.allWithinFreeTier ? "ok" : "warn"}" style="margin-top:4px"><span class="dot"></span>${ft.allWithinFreeTier ? "All within free tier" : "Tightest: " + esc(ft.tightestConstraint)}</div>`;
 
+  // Three states, each shown as itself: not configured, configured but not
+  // yet populated, populated. None of them invents a number.
+  if (billed.available) {
+    const rows = (billed.byService || []).slice(0, 8).map(r =>
+      `<tr><td>${esc(r.service)}</td><td class="num">${esc(billed.currency)} ${nf(r.cost, 4)}</td></tr>`).join("");
+    $("#billed").innerHTML = `
+      <div class="tier auth">authoritative · billed</div>
+      <div style="font-size:21px;font-weight:600;margin:6px 0 2px">${esc(billed.currency)} ${nf(billed.totalCost, 4)}</div>
+      <div style="font-size:12.5px" class="muted">Google's own billing export, last ${esc(billed.windowDays)} days · ${nf(billed.rowsSeen)} rows</div>
+      ${rows ? `<table class="pat-table" style="margin-top:10px"><thead><tr><th>Service</th><th class="right">Billed</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
+      <div style="font-size:12px;margin-top:8px" class="faint">${esc(billed.latencyCharacteristics)}</div>`;
+    loadReconcile();
+    return;
+  }
   $("#billed").innerHTML = `
     <div class="pill muted" style="margin-bottom:9px"><span class="dot"></span>not configured</div>
     <div style="font-size:12.5px" class="muted">${esc(billed.reason)}</div>
