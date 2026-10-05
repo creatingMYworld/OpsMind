@@ -78,6 +78,29 @@ _METRICS = [
 ]
 
 
+
+def _service_filter(metric_type: str, services: List[str]) -> str:
+    """A Cloud Monitoring filter for one metric across several services.
+
+    Monitoring and Logging do NOT share a filter language, which is easy to
+    miss because they sit next to each other in the console. Logging accepts
+    `field=("a" OR "b")`; Monitoring rejects it with
+
+        400 The right-hand side of a comparison contains an unsupported value
+
+    and the whole NEAR_REAL_TIME tier goes quiet while everything else keeps
+    working -- so the dashboard looks fine and simply has no CPU or memory.
+    Spelling the comparisons out individually is unambiguous and avoids
+    depending on `one_of()` being supported.
+    """
+    names = [s for s in dict.fromkeys(services) if s]
+    if not names:
+        return 'metric.type="%s" AND resource.type="cloud_run_revision"' % metric_type
+    clause = " OR ".join('resource.labels.service_name="%s"' % n for n in names)
+    return ('metric.type="%s" AND resource.type="cloud_run_revision" AND (%s)'
+            % (metric_type, clause))
+
+
 class GcpMetricCollector:
     def __init__(self) -> None:
         self._client = None
@@ -117,14 +140,9 @@ class GcpMetricCollector:
                 monitoring_v3.Aggregation.Reducer, spec["reducer"]),
             "group_by_fields": ["resource.labels.service_name"],
         })
-        services = " OR ".join('"%s"' % s for s in settings.watched_services)
         request = monitoring_v3.ListTimeSeriesRequest(
             name="projects/%s" % (settings.active_project or settings.project_id),
-            filter=(
-                'metric.type="%s" AND resource.type="cloud_run_revision" '
-                'AND resource.labels.service_name=(%s)'
-                % (spec["type"], services)
-            ),
+            filter=_service_filter(spec["type"], settings.watched_services),
             interval=interval,
             aggregation=aggregation,
             view=monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL,
