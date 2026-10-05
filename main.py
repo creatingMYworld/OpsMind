@@ -464,8 +464,10 @@ def trace(trace_id: str) -> Dict[str, Any]:
 # --- errors / services / metrics ------------------------------------------
 @app.get("/api/v1/errors")
 def errors(window: int = Query(60, ge=1, le=180),
-           limit: int = Query(25, ge=1, le=100)) -> Dict[str, Any]:
-    groups = store.error_groups(window_minutes=window, limit=limit)
+           limit: int = Query(25, ge=1, le=100),
+           severity: Optional[str] = None) -> Dict[str, Any]:
+    groups = store.error_groups(window_minutes=window, limit=limit,
+                                min_severity=severity)
     buckets = store.series(window_minutes=window)
     return {
         "windowMinutes": window,
@@ -475,6 +477,7 @@ def errors(window: int = Query(60, ge=1, le=180),
             "errors4xx": sum(b.get("errors4xx", 0) for b in buckets),
             "requests": sum(b.get("requests", 0) for b in buckets),
         },
+        "severityFloor": (severity or "").upper() or None,
         "groupingKey": "service + errorCode + errorClass + route + "
                        "normalized message (deterministic, no ML)",
     }

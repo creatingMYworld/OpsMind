@@ -1069,7 +1069,10 @@ function renderWaterfall(t) {
 /* ---------- errors ---------- */
 async function loadErrors() {
   const svc = $("#logSvc").value;
-  const e = await api(`/api/v1/errors?window=${state.window}&limit=50`);
+  // Carry the log list's severity, so the two panels cannot disagree.
+  const sev = $("#logSev").value;
+  const e = await api(`/api/v1/errors?window=${state.window}&limit=50`
+                      + (sev ? `&severity=${encodeURIComponent(sev)}` : ""));
   const groups = e.groups.filter(g => !svc || g.service === svc);
   const t = e.totals;
   const top = groups[0];

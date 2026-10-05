@@ -505,11 +505,21 @@ class Store:
             })
         return sorted(out, key=lambda d: d["service"])
 
-    def error_groups(self, window_minutes: int = 60,
-                     limit: int = 25) -> List[Dict[str, Any]]:
+    def error_groups(self, window_minutes: int = 60, limit: int = 25,
+                     min_severity: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Error groups in the window, optionally at or above a severity.
+
+        The severity floor exists so the Errors panel agrees with the log list
+        above it. Without it, choosing CRITICAL showed "0 matching" rows and
+        seven ERROR groups on the same screen, which reads as a bug in the
+        product rather than as two panels answering different questions.
+        """
         cutoff = time.time() - window_minutes * 60
+        floor = SEVERITY_RANK.get((min_severity or "").upper())
         with self._lock:
-            groups = [g for g in self._groups.values() if g.lastSeen >= cutoff]
+            groups = [g for g in self._groups.values() if g.lastSeen >= cutoff
+                      and (floor is None
+                           or SEVERITY_RANK.get(g.severity, 0) >= floor)]
         groups.sort(key=lambda g: (g.count, g.lastSeen), reverse=True)
         return [g.to_dict() for g in groups[:limit]]
 
