@@ -358,12 +358,15 @@ function fact(label, valueHtml) {
 /* Only text a model actually wrote carries this tag. Deterministic fallbacks
    are shown untagged, because nothing generated them. */
 const AI_TAG = `<span class="pill ai">✦ AI · Gemini on Vertex AI</span>`;
+// Without an href the tile is plain: no arrow, nothing to click. A tile that
+// links to the page it sits on promises a destination that does not exist.
 function linkTile({ label, value, valueColor, foot, href, spark, sparkColor }) {
-  return `<a class="card ktile" href="${href}">
-    <div class="ktile-label">${esc(label)}<span class="ktile-go" aria-hidden="true">→</span></div>
+  const tag = href ? "a" : "div";
+  return `<${tag} class="card ktile${href ? "" : " static"}"${href ? ` href="${href}"` : ""}>
+    <div class="ktile-label">${esc(label)}${href ? '<span class="ktile-go" aria-hidden="true">→</span>' : ""}</div>
     <div class="ktile-row"><div class="ktile-value"${valueColor ? ` style="color:var(${valueColor})"` : ""}>${value}</div>
       ${spark ? sparkline(spark, sparkColor) : ""}</div>
-    <div class="ktile-foot">${foot}</div></a>`;
+    <div class="ktile-foot">${foot}</div></${tag}>`;
 }
 function renderFailing({ t, points, routes, actions }) {
   const cpuSeries = points.map(p => p.cpuPctMax);
@@ -1283,7 +1286,7 @@ async function loadInsights() {
 
   $("#insTiles").innerHTML = [
     linkTile({ label: "Anomalies", value: nf(anoms.length), valueColor: anoms.length ? "--warn" : "--ok",
-               foot: `beyond ${nf(an.sigma || 3, 1)}σ of their own baseline`, href: "#insights" }),
+               foot: `beyond ${nf(an.sigma || 3, 1)}σ of their own baseline` }),
     linkTile({ label: "Breaching now", value: nf(inc.stats.breachingNow), valueColor: inc.stats.breachingNow ? "--err" : "--ok",
                foot: `${nf(inc.stats.distinctIncidents)} incident(s) in window`, href: "#incidents" }),
     linkTile({ label: "Revenue at risk", value: atRisk ? inr(atRisk) : "—", valueColor: atRisk ? "--warn" : null,
@@ -1804,13 +1807,13 @@ async function loadIncidents() {
 
   $("#incTiles").innerHTML = [
     linkTile({ label: "Breaching now", value: nf(st.breachingNow), valueColor: st.breachingNow ? "--err" : "--ok",
-               foot: "thresholds currently crossed", href: "#incidents" }),
-    linkTile({ label: "Resolved", value: nf(st.resolvedInWindow), foot: "stopped breaching in this window", href: "#incidents" }),
+               foot: "thresholds currently crossed" }),
+    linkTile({ label: "Resolved", value: nf(st.resolvedInWindow), foot: "stopped breaching in this window" }),
     linkTile({ label: "Episodes", value: nf(st.totalEpisodes),
-               foot: `across ${nf(st.distinctIncidents)} distinct incident${st.distinctIncidents === 1 ? "" : "s"}`, href: "#incidents" }),
+               foot: `across ${nf(st.distinctIncidents)} distinct incident${st.distinctIncidents === 1 ? "" : "s"}` }),
     // The backend's "critical" count includes HIGH, so the label says so.
     linkTile({ label: "High or critical", value: nf(st.critical), valueColor: st.critical ? "--err" : null,
-               foot: "top two severities", href: "#incidents" }),
+               foot: "top two severities" }),
   ].join("");
   $("#incBreachChip").innerHTML = st.breachingNow ? chip(`${nf(st.breachingNow)} need someone`, "--err") : chip("All clear", "--ok");
   $("#incResolvedChip").innerHTML = st.resolvedInWindow ? chip(`${nf(st.resolvedInWindow)} resolved`, "--text-faint") : "";

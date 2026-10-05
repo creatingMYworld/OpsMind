@@ -1040,3 +1040,7 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
    /account and no way to sign out -- a problem on any shared machine. */
 .acct-initials { font-size: 11px; font-weight: 600; letter-spacing: .02em; }
 #acctBtn { text-decoration: none; gap: 6px; }
+
+/* A tile with no destination does not pretend to be a link. */
+.ktile.static { cursor: default; }
+.ktile.static:hover { border-color: var(--border); background: var(--bg-elev); }
