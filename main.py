@@ -31,7 +31,7 @@ from html import escape as _esc
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
-from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
                                StreamingResponse)
 from fastapi.staticfiles import StaticFiles

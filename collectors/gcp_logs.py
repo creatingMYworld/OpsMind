@@ -20,7 +20,7 @@ dedupe key absorbs the overlap. Losing an entry is worse than seeing it twice.
 import datetime
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from ..config import settings
 from ..engine.normalize import normalize_gcp

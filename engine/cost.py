@@ -37,7 +37,7 @@ measures. Instance-based billing would need real instance-seconds from Cloud
 Monitoring; that path is noted as a limitation rather than faked.
 """
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from ..config import settings
 

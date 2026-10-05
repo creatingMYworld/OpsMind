@@ -21,7 +21,7 @@ the evidence that produced it.
 import math
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 # Masking order matters: quoted strings and measurements are replaced before
 # bare numbers, or the number rule would eat the digits inside them first.

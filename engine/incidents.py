@@ -306,8 +306,6 @@ class IncidentManager:
 
             severity = max((i.severity for i in incs),
                            key=lambda s: _SEVERITY_ORDER.get(s, 0))
-            window = max((t.get("windowMinutes") or 0)
-                         for i in incs for t in [{}] + list(i.triggers.values())) or None
             rule_windows = [t.get("windowMinutes") for i in incs
                             for t in i.triggers.values() if t.get("windowMinutes")]
 

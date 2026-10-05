@@ -14,7 +14,6 @@ blindly.
 import time
 from typing import Any, Dict, List, Optional
 
-from ..config import settings
 
 
 def _pct(numerator: float, denominator: float) -> Optional[float]:

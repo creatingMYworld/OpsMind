@@ -1035,3 +1035,8 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
 }
 .g-chip:hover { border-color: var(--accent); color: var(--text); }
 .guide-foot .btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+
+/* Account link in the top bar. Without it the dashboard had no route to
+   /account and no way to sign out -- a problem on any shared machine. */
+.acct-initials { font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+#acctBtn { text-decoration: none; gap: 6px; }

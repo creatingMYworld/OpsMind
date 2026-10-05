@@ -16,7 +16,7 @@ active source so the dashboard can label its provenance honestly.
 import json
 import os
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 def _env(name: str, default: str = "") -> str:
