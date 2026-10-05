@@ -32,12 +32,14 @@ from ..config import settings
 # 200 MB cap is far above that and far below anything that could cost money.
 _MAX_BYTES = 200 * 1024 * 1024
 _CACHE_TTL_S = 900.0
+# How far back to look before concluding the export really is empty.
+_WIDE_WINDOW_DAYS = 45
 
 _lock = threading.Lock()
 _cache: Dict[str, Any] = {"at": 0.0, "value": None}
 _client = None
 _client_error: Optional[str] = None
-_table_cache: Dict[str, Any] = {"at": 0.0, "name": None}
+_table_cache: Dict[str, Any] = {"at": 0.0, "names": None}
 
 
 def enabled() -> bool:
@@ -57,33 +59,35 @@ def _get_client() -> Any:
         return _client
 
 
-def _find_table() -> Optional[str]:
-    """The export table, discovered rather than configured.
+def _candidate_tables() -> List[str]:
+    """Export tables worth querying, best first.
 
-    Its name carries the billing account id, which nobody should have to copy
-    into an environment variable. The detailed (resource-level) table is
-    preferred because it carries per-SKU rows, which is what reconciliation
-    needs; the standard table is the fallback.
+    Google writes up to two: a detailed (resource-level) table and a standard
+    one. Detailed is preferred because it carries per-SKU rows, which is what
+    reconciliation needs -- but the two do not start filling at the same time,
+    and a freshly enabled export can leave detailed empty for longer. Returning
+    both, in order, lets the caller fall through to whichever actually has
+    data rather than reporting "empty" while rows sit in the other table.
     """
     if settings.billing_export_table:
-        return settings.billing_export_table
+        return [settings.billing_export_table]
     now = time.time()
-    if _table_cache["name"] and now - _table_cache["at"] < 3600:
-        return _table_cache["name"]
+    cached = _table_cache.get("names")
+    if cached and now - _table_cache["at"] < 3600:
+        return list(cached)
     client = _get_client()
     if client is None:
-        return None
+        return []
     try:
         dataset = "%s.%s" % (settings.project_id, settings.billing_export_dataset)
         names = [t.table_id for t in client.list_tables(dataset)]
     except Exception:  # noqa: BLE001
-        return None
-    detailed = [n for n in names if n.startswith("gcp_billing_export_resource_v1_")]
-    standard = [n for n in names if n.startswith("gcp_billing_export_v1_")]
-    chosen = (sorted(detailed) or sorted(standard) or [None])[0]
-    if chosen:
-        _table_cache.update({"at": now, "name": chosen})
-    return chosen
+        return []
+    ordered = (sorted(n for n in names if n.startswith("gcp_billing_export_resource_v1_"))
+               + sorted(n for n in names if n.startswith("gcp_billing_export_v1_")))
+    if ordered:
+        _table_cache.update({"at": now, "names": ordered})
+    return ordered
 
 
 def _run(sql: str, params: List[Any]) -> List[Dict[str, Any]]:
@@ -97,11 +101,30 @@ def _run(sql: str, params: List[Any]) -> List[Dict[str, Any]]:
 
 
 def _query(days: int) -> Dict[str, Any]:
-    from google.cloud import bigquery
+    """Totals and a per-service breakdown, from the first table holding rows.
 
-    table = _find_table()
-    if not table:
+    An empty result is retried once over a much wider window. Rows are
+    partitioned by when the export wrote them, and a backfill can place older
+    usage outside a seven-day slice -- so "nothing in the last week" is not
+    the same as "nothing at all". The table is a few megabytes, so the wider
+    scan costs nothing worth measuring and still stays under the byte cap.
+    """
+    tables = _candidate_tables()
+    if not tables:
         return {"state": "no_table", "table": None}
+
+    for table in tables:
+        for window in (days, max(days, _WIDE_WINDOW_DAYS)):
+            got = _query_table(table, window)
+            if got["state"] == "ok":
+                return got
+            if window >= _WIDE_WINDOW_DAYS:
+                break
+    return {"state": "empty", "table": tables[0], "tablesTried": tables}
+
+
+def _query_table(table: str, days: int) -> Dict[str, Any]:
+    from google.cloud import bigquery
 
     full = "`%s.%s.%s`" % (settings.project_id, settings.billing_export_dataset, table)
     params = [bigquery.ScalarQueryParameter("days", "INT64", days)]
