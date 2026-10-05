@@ -781,7 +781,14 @@ def cost_freetier(window: int = Query(30, ge=1, le=180)) -> Dict[str, Any]:
 
 
 @app.get("/api/v1/cost/billed")
-def cost_billed(days: int = Query(7, ge=1, le=60)) -> Dict[str, Any]:
+def cost_billed(days: int = Query(7, ge=1, le=60),
+                refresh: bool = False) -> Dict[str, Any]:
+    """The billed tier. `refresh=true` skips the 15-minute cache, which is
+    what you want right after enabling an export and wondering whether rows
+    have landed yet."""
+    if refresh:
+        from .collectors import gcp_billing
+        return gcp_billing.status(days=days, force=True)
     return cost_engine.billed_status(days=days)
 
 

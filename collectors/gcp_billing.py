@@ -205,7 +205,12 @@ def status(days: int = 7, force: bool = False) -> Dict[str, Any]:
             "yet. That table appears within a few hours of enabling the "
             "export."))
     elif got["state"] == "empty":
+        # Name every table that was checked. "Empty" is a claim about the
+        # export, and a claim nobody can verify is worth very little -- this
+        # is what lets someone open BigQuery and check it for themselves.
         out = dict(base, available=False, configured=True, table=got["table"],
+                   tablesTried=got.get("tablesTried") or [got["table"]],
+                   windowDaysChecked=_WIDE_WINDOW_DAYS,
                    reason=(
             "The export table exists and is empty. Billing rows land with "
             "roughly a day of latency, so this is the expected state for "
