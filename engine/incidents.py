@@ -51,6 +51,11 @@ class Incident:
         self.timeline: List[Dict[str, Any]] = []
         self.peakObserved: Dict[str, float] = {}
         self.clearStreak = 0
+        # The breach was decided over the rule's window, which ends at
+        # detection. Evidence (matching entries, before/during, impact) starts
+        # there too: starting at detection leaves it empty for the first
+        # minute and makes a fresh incident look like it cost nothing.
+        self.evidenceFrom = self.startedAt - 60.0 * (breach.windowMinutes or 1)
         self._add_trigger(breach, first=True)
 
     # --- lifecycle ---------------------------------------------------------
@@ -65,6 +70,7 @@ class Incident:
             "threshold": breach.threshold,
             "unit": breach.rule.unit,
             "observed": breach.observed,
+            "windowMinutes": breach.windowMinutes,
             "source": breach.rule.source,
             "category": breach.rule.category,
             "firstSeenAt": self.triggers.get(rid, {}).get("firstSeenAt", time.time()),
@@ -179,10 +185,10 @@ class Incident:
 
     def impact(self, store) -> Dict[str, Any]:
         """Cost and business impact. Both modeled, both labelled."""
-        cost = cost_engine.incident_delta(store, self.startedAt)
-        window = max(1, int((time.time() - self.startedAt) / 60.0) + 1)
+        cost = cost_engine.incident_delta(store, self.evidenceFrom)
+        window = max(1, int((time.time() - self.evidenceFrom) / 60.0) + 1)
         buckets = store.series(window_minutes=min(window, settings.minute_buckets))
-        since = [b for b in buckets if b["ts"] >= self.startedAt - 60]
+        since = [b for b in buckets if b["ts"] >= self.evidenceFrom - 60]
         revenue_failed = round(sum(b.get("revenueFailedInr", 0.0) for b in since), 2)
         confirmed = sum(b.get("checkoutsConfirmed", 0) for b in since)
         failed = sum(b.get("checkoutsFailed", 0) for b in since)
@@ -309,8 +315,12 @@ class IncidentManager:
             rule_windows = [t.get("windowMinutes") for i in incs
                             for t in i.triggers.values() if t.get("windowMinutes")]
 
+            # Where this group's failure starts, so the page can show several
+            # alerts with one root cause as one problem.
+            root = self.correlate(latest, store).get("suspectedRootCauseService")                 if firing else None
             group = {
                 "key": scope,
+                "rootCause": root,
                 "title": latest.title(),
                 "summary": latest.summary(),
                 "severity": severity,
@@ -320,7 +330,7 @@ class IncidentManager:
                 "category": latest.category,
                 "breachingForS": round(breaching_s, 1),
                 "acrossS": round(across_s, 1),
-                "matchingEntries": self._matching_entries(store, latest, incs[0].startedAt),
+                "matchingEntries": self._matching_entries(store, latest, incs[0].evidenceFrom),
                 "ruleWindowMinutes": min(rule_windows) if rule_windows else None,
                 "startedAt": incs[0].startedAt,
                 "lastSeenAt": latest.lastSeenAt,
@@ -391,29 +401,46 @@ class IncidentManager:
             and abs(i.startedAt - incident.startedAt) <= window_s
         ]
         page = store.logs(limit=1500, min_severity="WARNING",
-                          since=incident.startedAt - 30)
+                          since=incident.evidenceFrom - 30)
         citations: Counter = Counter()
+        cited_by: Dict[str, Counter] = {}     # service -> dependencies it blames
         failing_services: Counter = Counter()
         for e in page["entries"]:
             if e.get("dependency") and (e.get("errorCode") or
                                         (e.get("httpStatus") or 0) >= 500):
                 citations[e["dependency"]] += 1
+                cited_by.setdefault(e.get("service"), Counter())[e["dependency"]] += 1
             if (e.get("httpStatus") or 0) >= 500:
                 failing_services[e.get("service")] += 1
 
+        # In a chain gateway -> orders -> payments, gateway blames orders and
+        # orders blames payments: the most-cited service can be a messenger.
+        # Follow the blame until reaching a service whose own errors cite no
+        # failing dependency -- that one is where the failure starts.
         suspected = citations.most_common(1)[0][0] if citations else None
+        chain = [suspected] if suspected else []
+        while suspected in cited_by and len(chain) < 8:
+            nxt = cited_by[suspected].most_common(1)[0][0]
+            if nxt in chain:
+                break
+            suspected = nxt
+            chain.append(nxt)
         if not suspected and failing_services:
             suspected = failing_services.most_common(1)[0][0]
 
         return {
             "suspectedRootCauseService": suspected,
             "rootCauseBasis": (
-                "most frequently cited failing dependency in error logs "
-                "during the incident window (%d citations)"
-                % citations[suspected] if suspected and citations[suspected]
+                ("failing dependency named in error logs during the incident "
+                 "window (%d citations)" % citations[suspected]
+                 + ("; followed the blame %s, and %s's own errors blame no "
+                    "other service" % (" -> ".join(chain), suspected)
+                    if len(chain) > 1 else ""))
+                if suspected and citations[suspected]
                 else "most 5xx responses during the incident window"
             ) if suspected else None,
             "dependencyCitations": dict(citations.most_common(5)),
+            "blameChain": chain,
             "errorsByService": dict(failing_services.most_common(5)),
             "relatedIncidentIds": [i.id for i in related],
             "relatedIncidents": [
@@ -433,13 +460,18 @@ class IncidentManager:
         is computed here from the store; the model adds no data.
         """
         now = time.time()
-        inc_minutes = max(1, int((now - incident.startedAt) / 60.0) + 1)
-        start_minute = int(incident.startedAt // 60)
+        inc_minutes = max(1, int((now - incident.evidenceFrom) / 60.0) + 1)
+        start_minute = int(incident.evidenceFrom // 60)
 
         all_buckets = store.series(window_minutes=settings.minute_buckets)
         before = [b for b in all_buckets
                   if start_minute - 15 <= b["minute"] < start_minute]
+        # The minute still filling reads low; leave it out once a complete
+        # minute exists, or per-minute rates come out understated.
+        now_minute = int(now // 60)
         during = [b for b in all_buckets if b["minute"] >= start_minute]
+        if any(b["minute"] < now_minute for b in during):
+            during = [b for b in during if b["minute"] < now_minute]
 
         def agg(rows: List[Dict[str, Any]], key: str) -> float:
             return sum(r.get(key, 0) or 0 for r in rows)

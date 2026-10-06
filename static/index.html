@@ -325,8 +325,19 @@
   <div class="notif-head">
     <strong>Notifications</strong>
     <span class="faint" style="font-size:11.5px" id="notifNote"></span>
+    <label class="notif-pop"><input type="checkbox" id="notifPopups"> Pop-ups</label>
   </div>
   <div id="notifList"></div>
+</div>
+
+<div class="alert-pop" id="alertPop" role="status" aria-live="polite" hidden>
+  <span class="alert-pop-bar"></span>
+  <div class="alert-pop-body">
+    <div class="alert-pop-title" id="alertPopTitle"></div>
+    <div class="alert-pop-sub" id="alertPopSub"></div>
+  </div>
+  <button class="alert-pop-view" id="alertPopView">View</button>
+  <button class="alert-pop-x" id="alertPopClose" aria-label="Dismiss">✕</button>
 </div>
 
 <div class="drawer-bg" id="drawerBg"></div>

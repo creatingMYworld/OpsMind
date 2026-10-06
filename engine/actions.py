@@ -196,9 +196,9 @@ def build(store, *, incidents: List[Dict[str, Any]],
             first_step="Open Logs for this window and compare against the "
                        "preceding %d minutes." % a.get("baselineMinutes", 30),
             verify="The series returns to roughly %s %s."
-                   % (_num(a["baselineMean"]), a["unit"]),
+                   % (_num(a["baselineMedian"]), a["unit"]),
             severity=a.get("severity", "MEDIUM"), firing=True,
-            evidence={"zScore": a["zScore"], "baselineMean": a["baselineMean"],
+            evidence={"zScore": a["zScore"], "baselineMedian": a["baselineMedian"],
                       "current": a["current"], "detail": a["evidence"]},
             link={"view": "insights"},
         ))

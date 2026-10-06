@@ -175,6 +175,12 @@ function scheduleRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   const ms = REFRESH_MS[state.window] || 20000;
   refreshTimer = setInterval(() => { if (!document.hidden) refresh(); }, ms);
+  // Charts are not redrawn while hidden (alerts still arrive on the live
+  // stream); returning to the tab refreshes immediately instead of waiting.
+  if (!scheduleRefresh.bound) {
+    scheduleRefresh.bound = true;
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+  }
   const sel = $("#windowSel");
   if (sel) sel.title = `Re-polled every ${Math.round(ms / 1000)}s at this window`;
   const lbl = $("#liveLabel");
@@ -978,6 +984,15 @@ function startStream() {
     if (state.logTotal != null) state.logTotal += batch.length;
     if (state.view === "logs") renderLogs();
   });
+  // Incidents opening and resolving arrive here the moment they happen,
+  // whether or not this tab is in front.
+  es.addEventListener("notify", e => onNotify(JSON.parse(e.data)));
+  es.addEventListener("stats", e => {
+    const open = JSON.parse(e.data).openIncidents || 0;
+    const badge = $("#incBadge");
+    badge.style.display = open ? "inline-block" : "none";
+    badge.textContent = open;
+  });
   es.onerror = () => { /* EventSource reconnects on its own */ };
 }
 function logFiltersChanged() { state.logs = []; startStream(); loadLogsInitial(); }
@@ -1308,9 +1323,9 @@ async function loadInsights() {
           <div class="anom-text">
             <div class="anom-title">${esc(a.label)} ${a.direction === "up" ? "rose" : "fell"} to ${nf(a.current, 1)}${unit}
               ${a.changePct == null ? "" : `<span class="faint">${a.changePct > 0 ? "+" : ""}${nf(a.changePct, 0)}%</span>`}</div>
-            <div class="anom-sub"><span class="mono">baseline ${nf(a.baselineMean, 1)}${unit}</span> · likely cause: ${causeHtml(svc)}</div>
+            <div class="anom-sub"><span class="mono">median ${nf(a.baselineMedian, 1)}${unit}</span> · likely cause: ${causeHtml(svc)}</div>
           </div>
-          <div class="anom-z"><div class="anom-zv">${nf(Math.abs(a.zScore), 1)}σ</div><div class="faint">from baseline</div></div>
+          <div class="anom-z"><div class="anom-zv">${Math.abs(a.zScore) >= 10 ? "≥10" : nf(Math.abs(a.zScore), 1)}σ</div><div class="faint">from baseline</div></div>
         </div>`;
       }).join("");
 
@@ -1845,7 +1860,7 @@ async function loadIncidents() {
 function renderIncidentGroups(sel, groups, emptyMsg) {
   const box = $(sel);
   if (!groups.length) { box.innerHTML = `<div class="empty">${esc(emptyMsg)}</div>`; return; }
-  box.innerHTML = groups.map((g, i) => {
+  const rowHtml = (g, i) => {
     const spark = (g.sparkline || []).map(v =>
       `<i class="${v > 0.55 ? "hot" : ""}" style="height:${Math.max(8, v * 100)}%"></i>`).join("");
     const when = g.status === "BREACHING" ? "just now" : ago(g.resolvedAt);
@@ -1874,7 +1889,25 @@ function renderIncidentGroups(sel, groups, emptyMsg) {
       </div>
       <div class="inc-detail" id="det-${esc(g.primaryIncidentId)}"></div>
     </div>`;
-  }).join("");
+  };
+  // Alerts that trace back to the same failing service are one problem: show
+  // them under that cause instead of as unrelated rows.
+  const byCause = new Map();
+  groups.forEach((g, i) => {
+    const k = g.rootCause || "__" + i;
+    if (!byCause.has(k)) byCause.set(k, []);
+    byCause.get(k).push([g, i]);
+  });
+  box.innerHTML = [...byCause.entries()].map(([cause, members]) => members.length < 2
+    ? rowHtml(...members[0])
+    : `<div class="cause-group">
+        <div class="cause-head">
+          <span class="pill err"><span class="dot"></span>Root cause</span>
+          <strong>${esc(svcShort(cause))}</strong>
+          <span class="faint">${members.length} alerts from one failure. Fix ${esc(svcShort(cause))} first; the rest follow from it.</span>
+        </div>
+        ${members.map(m => rowHtml(...m)).join("")}
+      </div>`).join("");
 
   $$(sel + " [data-exp]").forEach(btn => btn.addEventListener("click", async () => {
     const id = btn.dataset.exp;
@@ -2202,7 +2235,11 @@ let notifOpen = false;
 $("#bellBtn").addEventListener("click", async () => {
   notifOpen = !notifOpen;
   $("#notifPanel").hidden = !notifOpen;
-  if (notifOpen) await loadNotifications();
+  if (!notifOpen) return;
+  renderNotifList();
+  state.notifSeen = Math.max(state.notifSeen, ...state.notifs.map(x => x.ts), Date.now() / 1000);
+  store_.set(NOTIF_SEEN, String(state.notifSeen));
+  paintBell();
 });
 document.addEventListener("click", e => {
   if (!notifOpen) return;
@@ -2210,13 +2247,43 @@ document.addEventListener("click", e => {
   notifOpen = false; $("#notifPanel").hidden = true;
 });
 
-async function loadNotifications() {
-  const n = await api("/api/v1/notifications?limit=25");
-  $("#notifNote").textContent = n.note;
-  $("#notifList").innerHTML = n.notifications.length === 0
+/* ---------- notifications ----------
+   "Unread" means an incident opened after you last opened the bell, kept per
+   browser. Pop-ups are deliberately quiet: only for incidents opening, never
+   for resolutions; one card at a time, several at once become one line; the
+   same problem pops up at most once in ten minutes; no sound; gone after ten
+   seconds; and they can be switched off in the bell panel. */
+const NOTIF_SEEN = "opsmind.notifSeen", NOTIF_POPUPS = "opsmind.notifPopups";
+const store_ = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+};
+state.notifs = [];
+state.notifSeen = +store_.get(NOTIF_SEEN, String(Date.now() / 1000));
+const popupsOn = () => store_.get(NOTIF_POPUPS, "1") === "1";
+
+function setNotifs(items) {
+  const byKey = new Map(state.notifs.concat(items).map(x => [x.kind + x.incidentId, x]));
+  state.notifs = [...byKey.values()].sort((a, b) => b.ts - a.ts).slice(0, 40);
+  paintBell();
+  if (notifOpen) renderNotifList();
+}
+function paintBell() {
+  const unread = state.notifs.filter(x => x.kind === "opened" && x.ts > state.notifSeen).length;
+  const b = $("#bellBadge");
+  b.hidden = !unread;
+  b.textContent = unread > 99 ? "99+" : unread;
+  // A background tab shows the count in its title, which is visible without
+  // switching to it.
+  document.title = (unread ? `(${unread}) ` : "") + "OpsMind";
+}
+function renderNotifList() {
+  $("#notifNote").textContent = "Incidents opening and resolving";
+  $("#notifPopups").checked = popupsOn();
+  $("#notifList").innerHTML = state.notifs.length === 0
     ? `<div class="empty">Nothing has opened or resolved recently.</div>`
-    : n.notifications.map(x => `
-      <div class="notif-item" data-inc="${esc(x.incidentId)}">
+    : state.notifs.map(x => `
+      <div class="notif-item${x.kind === "opened" && x.ts > state.notifSeen ? " unread" : ""}" data-inc="${esc(x.incidentId)}">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span class="pill ${x.kind === "opened" ? "err" : "ok"}"><span class="dot"></span>${x.kind}</span>
           <span class="pill ${{ CRITICAL: "crit", HIGH: "err", MEDIUM: "warn" }[x.severity] || "muted"}">${esc(x.severity)}</span>
@@ -2228,15 +2295,42 @@ async function loadNotifications() {
       </div>`).join("");
   $$("#notifList [data-inc]").forEach(el => el.addEventListener("click", () => {
     notifOpen = false; $("#notifPanel").hidden = true;
-    go("incidents");
+    showIncident(el.dataset.inc);
   }));
 }
-
-function paintBell(unread) {
-  const b = $("#bellBadge");
-  b.hidden = !unread;
-  b.textContent = unread > 99 ? "99+" : unread;
+async function loadNotifications() {
+  const n = await api("/api/v1/notifications?limit=25");
+  setNotifs(n.notifications);
 }
+$("#notifPopups").addEventListener("change", e => store_.set(NOTIF_POPUPS, e.target.checked ? "1" : "0"));
+
+const popped = new Map();   // incident scope -> when it last popped up
+let popTimer = null;
+function onNotify(items) {
+  setNotifs(items);
+  const fresh = items.filter(x => x.kind === "opened"
+    && Date.now() - (popped.get(x.service || x.title) || 0) > 10 * 60 * 1000);
+  if (!fresh.length || !popupsOn()) return;
+  fresh.forEach(x => popped.set(x.service || x.title, Date.now()));
+  const top = fresh.slice().sort((a, b) => (SEV_RANK[b.severity] || 0) - (SEV_RANK[a.severity] || 0))[0];
+  $("#alertPopTitle").textContent = fresh.length === 1 ? top.title : `${fresh.length} new incidents`;
+  $("#alertPopSub").textContent = fresh.length === 1 ? top.summary : `Worst: ${top.title}`;
+  const pop = $("#alertPop");
+  pop.dataset.inc = fresh.length === 1 ? top.incidentId : "";
+  pop.className = "alert-pop " + (SEV_RANK[top.severity] >= 3 ? "high" : "medium");
+  pop.hidden = false;
+  armPop();
+}
+const SEV_RANK = { LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };
+function armPop() { clearTimeout(popTimer); popTimer = setTimeout(() => { $("#alertPop").hidden = true; }, 10000); }
+$("#alertPop").addEventListener("mouseenter", () => clearTimeout(popTimer));
+$("#alertPop").addEventListener("mouseleave", armPop);
+$("#alertPopClose").addEventListener("click", () => { $("#alertPop").hidden = true; });
+$("#alertPopView").addEventListener("click", () => {
+  const id = $("#alertPop").dataset.inc;
+  $("#alertPop").hidden = true;
+  id ? showIncident(id) : go("incidents");
+});
 
 /* ---------- orchestration ---------- */
 async function refresh() {
@@ -2267,9 +2361,7 @@ async function refresh() {
       badge.style.display = open ? "inline-block" : "none";
       badge.textContent = open;
     }
-    const n = await api("/api/v1/notifications?limit=25");
-    paintBell(n.unread);
-    if (notifOpen) await loadNotifications();
+    await loadNotifications();
   } catch (e) { console.error("refresh failed", e); }
 }
 

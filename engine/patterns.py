@@ -19,6 +19,7 @@ the same window always produces the same findings, and every finding carries
 the evidence that produced it.
 """
 import math
+import statistics
 import re
 import time
 from typing import Any, Dict, List
@@ -138,14 +139,18 @@ _SEV_RANK = {"DEBUG": 0, "INFO": 1, "NOTICE": 1, "WARNING": 2, "ERROR": 3, "CRIT
 
 
 def _stats(values: List[float]) -> Dict[str, float]:
+    """Robust baseline: median and scaled median absolute deviation.
+
+    Mean and standard deviation let the early minutes of a long outage leak
+    into the baseline and inflate it, so a sustained failure stopped looking
+    unusual after about five minutes. The median ignores those minutes.
+    """
     n = len(values)
     if n == 0:
-        return {"mean": 0.0, "stdev": 0.0, "n": 0}
-    mean = sum(values) / n
-    if n < 2:
-        return {"mean": mean, "stdev": 0.0, "n": n}
-    var = sum((v - mean) ** 2 for v in values) / (n - 1)
-    return {"mean": mean, "stdev": math.sqrt(var), "n": n}
+        return {"center": 0.0, "spread": 0.0, "n": 0}
+    med = statistics.median(values)
+    mad = statistics.median([abs(v - med) for v in values]) if n > 1 else 0.0
+    return {"center": med, "spread": 1.4826 * mad, "n": n}
 
 
 # Each anomaly check: (key, label, bucket field, direction, unit, why it matters)
@@ -222,25 +227,25 @@ def anomalies(store, window_minutes: int = 60, baseline_minutes: int = 30,
 
         # A flat baseline has zero deviation, so sigma alone would flag any
         # movement at all. Fall back to a floor derived from the mean.
-        spread = st["stdev"] if st["stdev"] > 0 else max(st["mean"] * 0.35, 1.0)
-        z = (cur - st["mean"]) / spread if spread else 0.0
+        spread = st["spread"] if st["spread"] > 0 else max(st["center"] * 0.35, 1.0)
+        z = (cur - st["center"]) / spread if spread else 0.0
         if direction == "up" and z <= 0:
             continue
         if abs(z) < sigma:
             continue
 
-        change = ((cur - st["mean"]) / st["mean"] * 100.0) if st["mean"] else None
+        change = ((cur - st["center"]) / st["center"] * 100.0) if st["center"] else None
         # Require a real relative move as well as a statistical one.
         if change is not None and abs(change) < 40:
             continue
-        if st["mean"] < 0.5 and cur < 2:
+        if st["center"] < 0.5 and cur < 2:
             continue
 
         found.append({
             "metric": key, "label": label, "unit": unit,
-            "direction": "up" if cur > st["mean"] else "down",
-            "baselineMean": round(st["mean"], 2),
-            "baselineStdev": round(st["stdev"], 2),
+            "direction": "up" if cur > st["center"] else "down",
+            "baselineMedian": round(st["center"], 2),
+            "baselineSpread": round(st["spread"], 2),
             "baselineMinutes": len(base_vals),
             "current": round(cur, 2),
             "changePct": round(change, 1) if change is not None else None,
@@ -248,9 +253,9 @@ def anomalies(store, window_minutes: int = 60, baseline_minutes: int = 30,
             "severity": "HIGH" if abs(z) >= sigma * 2 else "MEDIUM",
             "whyItMatters": why,
             "evidence": "last %d minute(s) averaged %.2f %s against a %d-minute "
-                        "baseline of %.2f (sd %.2f) -- %.1f standard deviations"
+                        "median baseline of %.2f (spread %.2f) -- %.1f spreads away"
                         % (len(cur_vals), cur, unit, len(base_vals),
-                           st["mean"], st["stdev"], z),
+                           st["center"], st["spread"], z),
         })
 
     found.sort(key=lambda a: abs(a["zScore"]), reverse=True)
@@ -259,7 +264,7 @@ def anomalies(store, window_minutes: int = 60, baseline_minutes: int = 30,
         "recentMinutes": recent_n,
         "sigma": sigma,
         "anomalies": found,
-        "method": "each series compared against its own preceding baseline; "
+        "method": "each series compared against the median of its own preceding baseline; "
                   "flagged when both the z-score exceeds %.1f and the relative "
                   "change exceeds 40%%. Deterministic." % sigma,
     }

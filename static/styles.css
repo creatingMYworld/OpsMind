@@ -1044,3 +1044,36 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
 /* A tile with no destination does not pretend to be a link. */
 .ktile.static { cursor: default; }
 .ktile.static:hover { border-color: var(--border); background: var(--bg-elev); }
+
+/* ---------- incident pop-up ----------
+   Quiet by design: small, beside the help button, no motion beyond a short
+   fade, no sound, gone after ten seconds. */
+.alert-pop {
+  position: fixed; right: 84px; bottom: 22px; z-index: 64; width: min(380px, calc(100vw - 110px));
+  display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 0;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .28); overflow: hidden;
+  animation: popIn .18s ease-out;
+}
+.alert-pop[hidden] { display: none !important; }
+@keyframes popIn { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { .alert-pop { animation: none; } }
+.alert-pop-bar { align-self: stretch; width: 4px; flex: none; background: var(--warn); }
+.alert-pop.high .alert-pop-bar { background: var(--err); }
+.alert-pop-body { flex: 1; min-width: 0; }
+.alert-pop-title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alert-pop-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alert-pop-view {
+  flex: none; font: 600 12px var(--sans); color: var(--accent); background: none;
+  border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; cursor: pointer;
+}
+.alert-pop-view:hover { border-color: var(--accent); }
+.alert-pop-x { flex: none; background: none; border: 0; color: var(--text-faint); cursor: pointer; font-size: 13px; padding: 4px; }
+.alert-pop-x:hover { color: var(--text); }
+.notif-pop { position: absolute; right: 16px; top: 13px; font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.notif-item.unread { box-shadow: inset 3px 0 0 var(--err); }
+
+/* Several alerts with one root cause, shown as one problem. */
+.cause-group { border: 1px solid color-mix(in srgb, var(--err) 35%, var(--border)); border-radius: var(--radius); padding: 12px; display: grid; gap: 10px; margin-bottom: 12px; }
+.cause-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; padding: 2px 4px 4px; }
+.cause-head strong { font-size: 15px; }

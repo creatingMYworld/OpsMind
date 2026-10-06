@@ -415,6 +415,7 @@ async def logs_stream(
 
     async def gen():
         cursor = time.time()
+        notified_to = cursor      # transitions after this have not been pushed
         last_beat = 0.0
         yield "retry: 3000\n\n"
         while True:
@@ -427,6 +428,15 @@ async def logs_stream(
             if entries:
                 cursor = max(e["ts"] for e in entries) + 1e-6
                 yield "event: logs\ndata: %s\n\n" % json.dumps(entries, default=str)
+            # An incident opening or resolving is pushed the moment the
+            # evaluator records it, so the dashboard needs no polling to know,
+            # and a background tab hears about it too.
+            fresh = [t for t in evaluator.recent_transitions
+                     if t.get("ts", 0) > notified_to]
+            if fresh:
+                notified_to = max(t["ts"] for t in fresh)
+                yield "event: notify\ndata: %s\n\n" % json.dumps(
+                    _notification_items(fresh), default=str)
             now = time.time()
             if now - last_beat > 5:
                 last_beat = now
@@ -722,8 +732,18 @@ def notifications(limit: int = Query(20, ge=1, le=60)) -> Dict[str, Any]:
     continuing to breach is not. Re-notifying every evaluation is how an alert
     feed becomes something people mute.
     """
+    items = _notification_items(evaluator.recent_transitions)
+    unread = sum(1 for i in items if i["kind"] == "opened")
+    return {"notifications": items[:limit], "total": len(items),
+            "unread": unread,
+            "note": "Transitions only. A condition that keeps breaching is one "
+                    "notification, not one per evaluation."}
+
+
+def _notification_items(transitions) -> List[Dict[str, Any]]:
+    """Incident transitions as notification rows, newest first."""
     items: List[Dict[str, Any]] = []
-    for t in reversed(evaluator.recent_transitions):
+    for t in reversed(transitions):
         for inc_id in t.get("opened", []):
             inc = incident_manager.get(inc_id)
             if inc:
@@ -743,11 +763,7 @@ def notifications(limit: int = Query(20, ge=1, le=60)) -> Dict[str, Any]:
                     "episode": inc.episode,
                 })
     items.sort(key=lambda x: x["ts"], reverse=True)
-    unread = sum(1 for i in items if i["kind"] == "opened")
-    return {"notifications": items[:limit], "total": len(items),
-            "unread": unread,
-            "note": "Transitions only. A condition that keeps breaching is one "
-                    "notification, not one per evaluation."}
+    return items
 
 
 @app.get("/api/v1/cost")
