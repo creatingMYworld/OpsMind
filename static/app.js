@@ -1800,18 +1800,36 @@ async function loadAlerts() {
           <span>observed <strong>${nf(b.observed, 2)}${esc(b.unit)}</strong> against ${nf(b.threshold, 2)}${esc(b.unit)}</span></div>`).join("")}</div>` : ""}
     </div>`).join("");
 
-  $$("#alertList [data-save]").forEach(btn => btn.addEventListener("click", async () => {
+  // Saved for good: every instance and every restart uses the new value. A
+  // save that fails says so and keeps the old value, rather than appearing to
+  // work and quietly reverting later.
+  const where = a.persistence && a.persistence.backend === "firestore" ? "Saved to Firestore" : "Saved";
+  const patchRule = async (btn, id, body, done) => {
+    btn.disabled = true;
+    try {
+      const r = await fetch(`/api/v1/alerts/${encodeURIComponent(id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || `${r.status}`);
+      toast(`${where}: ${done(d.rule)}`);
+    } catch (e) {
+      toast(`Not saved. ${e.message}`);
+    }
+    await loadAlerts();
+  };
+  $$("#alertList [data-save]").forEach(btn => btn.addEventListener("click", () => {
     const id = btn.dataset.save;
-    const v = parseFloat($(`#alertList [data-th="${id}"]`).value);
-    btn.disabled = true;
-    await api(`/api/v1/alerts/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threshold: v }) });
-    await loadAlerts();
+    const v = $(`#alertList [data-th="${id}"]`).value.trim();
+    if (v === "" || !Number.isFinite(Number(v)) || Number(v) < 0) {
+      toast("Not saved. Enter a threshold of 0 or more.");
+      return;
+    }
+    patchRule(btn, id, { threshold: Number(v) },
+      r => `${r.name} alerts above ${nf(r.threshold, 2)} ${r.unit}`);
   }));
-  $$("#alertList [data-tog]").forEach(btn => btn.addEventListener("click", async () => {
+  $$("#alertList [data-tog]").forEach(btn => btn.addEventListener("click", () => {
     const id = btn.dataset.tog, on = btn.dataset.on === "true";
-    btn.disabled = true;
-    await api(`/api/v1/alerts/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !on }) });
-    await loadAlerts();
+    patchRule(btn, id, { enabled: !on }, r => `${r.name} ${r.enabled ? "enabled" : "disabled"}`);
   }));
 }
 
@@ -1859,6 +1877,10 @@ async function loadIncidents() {
 
 function renderIncidentGroups(sel, groups, emptyMsg) {
   const box = $(sel);
+  // The page redraws on every refresh. An incident someone has open -- with
+  // its evidence, and possibly a Gemini explanation still on its way -- must
+  // survive that, so its panel is lifted out and put back unchanged.
+  const keep = new Map($$(sel + " .inc-detail.open").map(p => [p.id, p]));
   if (!groups.length) { box.innerHTML = `<div class="empty">${esc(emptyMsg)}</div>`; return; }
   const rowHtml = (g, i) => {
     const spark = (g.sparkline || []).map(v =>
@@ -1908,6 +1930,14 @@ function renderIncidentGroups(sel, groups, emptyMsg) {
         </div>
         ${members.map(m => rowHtml(...m)).join("")}
       </div>`).join("");
+
+  keep.forEach((panel, pid) => {
+    const fresh = document.getElementById(pid);
+    if (!fresh) return;                       // that incident left the list
+    fresh.replaceWith(panel);
+    const chev = box.querySelector(`[data-exp="${CSS.escape(pid.slice(4))}"]`);
+    if (chev) chev.textContent = "▴";
+  });
 
   $$(sel + " [data-exp]").forEach(btn => btn.addEventListener("click", async () => {
     const id = btn.dataset.exp;

@@ -23,6 +23,9 @@ these rules, each tagged with its source and observed latency.
 Thresholds are user-editable at runtime via PATCH /api/v1/alerts/{id}, which
 satisfies the brief's "set alert thresholds" step in the product itself.
 """
+import json
+import os
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -173,10 +176,99 @@ def default_rules() -> List[Rule]:
     ]
 
 
+class _OverrideStore:
+    """Where edited thresholds survive a restart.
+
+    One record holds every edited rule: {rule_id: {threshold, enabled,
+    windowMinutes, updatedAt}}. Firestore on a deployed portal (one document,
+    shared by every instance), a JSON file locally. Read-modify-write of the
+    whole record keeps rule ids, which contain hyphens, out of Firestore field
+    paths.
+    """
+    _DOC = "alert_rules"
+
+    def __init__(self) -> None:
+        self.backend = settings.alerts_backend
+        self._client = None
+        self._lock = threading.Lock()
+
+    def _doc(self) -> Any:
+        if self._client is None:
+            from google.cloud import firestore
+            self._client = firestore.Client(project=settings.project_id or None,
+                                            database=settings.firestore_database)
+        return self._client.collection(settings.alerts_collection).document(self._DOC)
+
+    def load(self) -> Dict[str, Dict[str, Any]]:
+        with self._lock:
+            if self.backend == "firestore":
+                snap = self._doc().get()
+                return (snap.to_dict() or {}).get("rules", {}) if snap.exists else {}
+            if self.backend == "file":
+                if not os.path.exists(settings.alerts_file):
+                    return {}
+                with open(settings.alerts_file, encoding="utf-8") as f:
+                    return json.load(f).get("rules", {})
+            return {}
+
+    def save(self, rule_id: str, values: Dict[str, Any]) -> None:
+        with self._lock:
+            if self.backend == "firestore":
+                doc = self._doc()
+                snap = doc.get()
+                rules = (snap.to_dict() or {}).get("rules", {}) if snap.exists else {}
+                rules[rule_id] = values
+                doc.set({"rules": rules, "updatedAt": time.time()})
+            elif self.backend == "file":
+                rules = {}
+                if os.path.exists(settings.alerts_file):
+                    with open(settings.alerts_file, encoding="utf-8") as f:
+                        rules = json.load(f).get("rules", {})
+                rules[rule_id] = values
+                tmp = settings.alerts_file + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump({"rules": rules}, f, indent=1)
+                os.replace(tmp, settings.alerts_file)   # never a half-written file
+
+
 class RuleSet:
+    # How often an instance re-reads saved thresholds, so an edit made on one
+    # Cloud Run instance reaches the others without a restart.
+    SYNC_EVERY_S = 30.0
+
     def __init__(self) -> None:
         self._rules: Dict[str, Rule] = {r.id: r for r in default_rules()}
         self._clear_counts: Dict[str, int] = {}
+        self._store = _OverrideStore()
+        self._synced_at = 0.0
+        self.persistence: Dict[str, Any] = {
+            "backend": self._store.backend,
+            "persistent": self._store.backend in ("firestore", "file"),
+            "loadedAt": None, "lastError": None,
+        }
+
+    def sync(self, force: bool = False) -> None:
+        """Apply saved thresholds. Never raises: a store that cannot be read
+        leaves the current values in place and records why."""
+        if not force and time.time() - self._synced_at < self.SYNC_EVERY_S:
+            return
+        self._synced_at = time.time()
+        try:
+            saved = self._store.load()
+        except Exception as exc:  # noqa: BLE001
+            self.persistence["lastError"] = "%s: %s" % (type(exc).__name__, str(exc)[:160])
+            return
+        for rule_id, v in saved.items():
+            rule = self._rules.get(rule_id)
+            if not rule:
+                continue
+            if v.get("threshold") is not None:
+                rule.threshold = float(v["threshold"])
+            if v.get("enabled") is not None:
+                rule.enabled = bool(v["enabled"])
+            if v.get("windowMinutes") is not None:
+                rule.windowMinutes = max(1, min(int(v["windowMinutes"]), 60))
+        self.persistence.update(loadedAt=time.time(), lastError=None)
 
     def list(self) -> List[Dict[str, Any]]:
         return [r.to_dict() for r in self._rules.values()]
@@ -187,15 +279,28 @@ class RuleSet:
     def update(self, rule_id: str, *, threshold: Optional[float] = None,
                enabled: Optional[bool] = None,
                window_minutes: Optional[int] = None) -> Optional[Rule]:
+        """Change a rule and save it. The change is kept only if it was saved:
+        an edit that silently vanished on the next restart is worse than one
+        that visibly failed. Raises RuntimeError when the save fails."""
         rule = self._rules.get(rule_id)
         if not rule:
             return None
+        before = (rule.threshold, rule.enabled, rule.windowMinutes)
         if threshold is not None:
             rule.threshold = float(threshold)
         if enabled is not None:
             rule.enabled = bool(enabled)
         if window_minutes is not None:
             rule.windowMinutes = max(1, min(int(window_minutes), 60))
+        try:
+            self._store.save(rule_id, {"threshold": rule.threshold, "enabled": rule.enabled,
+                                       "windowMinutes": rule.windowMinutes,
+                                       "updatedAt": time.time()})
+        except Exception as exc:  # noqa: BLE001
+            rule.threshold, rule.enabled, rule.windowMinutes = before
+            self.persistence["lastError"] = "%s: %s" % (type(exc).__name__, str(exc)[:160])
+            raise RuntimeError(self.persistence["lastError"])
+        self.persistence["lastError"] = None
         return rule
 
     # --- metric extraction -------------------------------------------------
@@ -264,6 +369,7 @@ class RuleSet:
 
     # --- evaluation --------------------------------------------------------
     def evaluate(self, store) -> List[Breach]:
+        self.sync()
         breaches: List[Breach] = []
         services = sorted(set(settings.watched_services))
 

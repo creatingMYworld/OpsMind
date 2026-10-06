@@ -7,3 +7,7 @@ venv/
 .env
 *-key.json
 service-account*.json
+
+# Local alert threshold edits (deployed portals keep them in Firestore)
+.alert_rules.json
+.alert_rules.json.tmp

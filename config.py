@@ -114,6 +114,15 @@ class Settings:
         self.history_enabled: bool = _env("HISTORY_ENABLED", "false").lower() in (
             "1", "true", "yes")
         self.firestore_database: str = _env("FIRESTORE_DATABASE", "(default)")
+        # Edited alert thresholds. A deployed portal keeps them in Firestore,
+        # because Cloud Run forgets its memory and disk on every restart and
+        # each instance would otherwise hold its own copy. Locally they go to
+        # a small JSON file beside the code.
+        self.alerts_backend: str = _env(
+            "ALERTS_BACKEND", "firestore" if self.data_source == "gcp" else "file").lower()
+        self.alerts_collection: str = _env("ALERTS_COLLECTION", "opsmind_settings")
+        self.alerts_file: str = _env("ALERTS_FILE", os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), ".alert_rules.json"))
         self.history_collection: str = _env("HISTORY_COLLECTION", "opsmind_daily")
         self.history_events_collection: str = _env(
             "HISTORY_EVENTS_COLLECTION", "opsmind_incidents")

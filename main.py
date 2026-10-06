@@ -173,6 +173,7 @@ _rule_warnings: List[Dict[str, Any]] = []
 
 @app.on_event("startup")
 def _startup() -> None:
+    ruleset.sync(force=True)     # edited thresholds survive a restart
     evaluator.start()
     try:
         _rule_warnings.extend(ruleset.validate_metrics(store))
@@ -541,6 +542,7 @@ def metrics_platform() -> Dict[str, Any]:
 # --- alerts ---------------------------------------------------------------
 @app.get("/api/v1/alerts")
 def alerts() -> Dict[str, Any]:
+    ruleset.sync()
     rules = ruleset.list()
     breaches = {b.key: b.to_dict() for b in ruleset.evaluate(store)}
     for r in rules:
@@ -563,6 +565,7 @@ def alerts() -> Dict[str, Any]:
                             "docs/DEPLOY.md step 9.",
              "latency": "1-3 minutes"},
         ],
+        "persistence": ruleset.persistence,
         "note": "Both read real telemetry. Thresholds below are editable, "
                 "which is the brief's 'set alert thresholds' step implemented "
                 "inside the product.",
@@ -572,12 +575,28 @@ def alerts() -> Dict[str, Any]:
 @app.patch("/api/v1/alerts/{rule_id}")
 def update_alert(rule_id: str,
                  payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    rule = ruleset.update(
-        rule_id,
-        threshold=payload.get("threshold"),
-        enabled=payload.get("enabled"),
-        window_minutes=payload.get("windowMinutes"),
-    )
+    threshold, enabled, window = (payload.get("threshold"), payload.get("enabled"),
+                                  payload.get("windowMinutes"))
+    # Saved values are applied to every instance, so reject anything that is
+    # not a real number before it is stored.
+    try:
+        if threshold is not None:
+            threshold = float(threshold)
+            if threshold != threshold or threshold in (float("inf"), float("-inf"))                     or threshold < 0:
+                raise ValueError
+        if window is not None:
+            window = int(window)
+        if enabled is not None and not isinstance(enabled, bool):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="threshold must be a number of 0 or "
+                            "more, windowMinutes a whole number, enabled true or false")
+    try:
+        rule = ruleset.update(rule_id, threshold=threshold, enabled=enabled,
+                              window_minutes=window)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="Not saved, so the old value is "
+                            "kept. The store could not be written: %s" % exc)
     if rule is None:
         raise HTTPException(status_code=404, detail="no such rule")
     return {"updated": True, "rule": rule.to_dict()}
