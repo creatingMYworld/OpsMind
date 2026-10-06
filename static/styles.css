@@ -1077,3 +1077,10 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
 .cause-group { border: 1px solid color-mix(in srgb, var(--err) 35%, var(--border)); border-radius: var(--radius); padding: 12px; display: grid; gap: 10px; margin-bottom: 12px; }
 .cause-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; padding: 2px 4px 4px; }
 .cause-head strong { font-size: 15px; }
+
+/* Incident ownership: who is on it, who closed it, and whether there is
+   enough traffic to trust what the numbers say. */
+.inc-people { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.inc-actions { display: flex; gap: 8px; margin-top: 10px; }
+.inc-actions .btn { font-size: 12.5px; padding: 6px 12px; }
+.inc-note { font-size: 12px; margin: -6px 0 10px; }

@@ -31,7 +31,8 @@ class Evaluator:
         self.evaluations += 1
         self.last_eval_ts = time.time()
         self.last_breach_count = len(breaches)
-        if result["opened"] or result["resolved"]:
+        if result["opened"] or result["resolved"] or result.get("recovered") \
+                or result.get("reopened"):
             entry = {"ts": time.time(), **result}
             self.recent_transitions.append(entry)
             self.recent_transitions = self.recent_transitions[-40:]

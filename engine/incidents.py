@@ -28,7 +28,13 @@ from ..config import settings
 from . import cost as cost_engine
 from .rules import Breach, SCOPE_GLOBAL
 
+# OPEN       the condition is breaching
+# RECOVERED  the condition has been back within threshold for a few checks,
+#            but nobody has confirmed the problem is fixed. It is NOT resolved:
+#            a metric going quiet is not the same as someone fixing it.
+# RESOLVED   a person marked it resolved
 STATUS_OPEN = "OPEN"
+STATUS_RECOVERED = "RECOVERED"
 STATUS_RESOLVED = "RESOLVED"
 
 _SEVERITY_ORDER = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
@@ -51,6 +57,10 @@ class Incident:
         self.timeline: List[Dict[str, Any]] = []
         self.peakObserved: Dict[str, float] = {}
         self.clearStreak = 0
+        self.recoveredAt: Optional[float] = None
+        self.acknowledgedAt: Optional[float] = None
+        self.acknowledgedBy: Optional[str] = None
+        self.resolvedBy: Optional[str] = None
         # The breach was decided over the rule's window, which ends at
         # detection. Evidence (matching entries, before/during, impact) starts
         # there too: starting at detection leaves it empty for the first
@@ -107,26 +117,47 @@ class Incident:
         if len(self.timeline) > 200:
             self.timeline = self.timeline[-200:]
 
-    def touch(self, breach: Breach) -> None:
+    def touch(self, breach: Breach) -> bool:
+        """Returns True when a recovered incident has started breaching again."""
         self.lastSeenAt = time.time()
         self.clearStreak = 0
+        reopened = self.status == STATUS_RECOVERED
+        if reopened:
+            self.status = STATUS_OPEN
+            self.recoveredAt = None
+            self.add_event("reopened", "breaching again before anyone marked it resolved")
         self._add_trigger(breach)
+        return reopened
 
     def mark_clear(self, required: int) -> bool:
-        """Returns True when the incident has just resolved."""
+        """Returns True when the incident has just recovered.
+
+        Recovery is not resolution: the incident stays on the list, marked
+        recovered, until a person confirms it is fixed."""
         if self.status != STATUS_OPEN:
             return False
         self.clearStreak += 1
         if self.clearStreak >= required:
-            self.status = STATUS_RESOLVED
-            self.resolvedAt = time.time()
+            self.status = STATUS_RECOVERED
+            self.recoveredAt = time.time()
             self.add_event(
-                "resolved",
-                "all breached conditions clear for %d consecutive evaluations"
-                % required,
+                "recovered",
+                "all breached conditions clear for %d consecutive evaluations; "
+                "waiting for someone to confirm it is fixed" % required,
             )
             return True
         return False
+
+    def acknowledge(self, who: str) -> None:
+        if self.acknowledgedAt is None:
+            self.acknowledgedAt, self.acknowledgedBy = time.time(), who
+            self.add_event("acknowledged", "acknowledged by %s" % who, source="person")
+
+    def resolve(self, who: str, still_breaching: bool) -> None:
+        self.status = STATUS_RESOLVED
+        self.resolvedAt, self.resolvedBy = time.time(), who
+        self.add_event("resolved", "marked resolved by %s%s" % (
+            who, " while still breaching" if still_breaching else ""), source="person")
 
     # --- serialisation -----------------------------------------------------
     def to_dict(self, store=None) -> Dict[str, Any]:
@@ -142,6 +173,10 @@ class Incident:
             "startedAt": self.startedAt,
             "lastSeenAt": self.lastSeenAt,
             "resolvedAt": self.resolvedAt,
+            "resolvedBy": self.resolvedBy,
+            "recoveredAt": self.recoveredAt,
+            "acknowledgedAt": self.acknowledgedAt,
+            "acknowledgedBy": self.acknowledgedBy,
             "durationS": round(duration, 1),
             "episode": self.episode,
             "title": self.title(),
@@ -231,6 +266,7 @@ class IncidentManager:
     def ingest(self, breaches: List[Breach], clear_required: int = 3) -> Dict[str, Any]:
         seen_scopes = set()
         opened: List[str] = []
+        reopened: List[str] = []
         for b in breaches:
             scope = b.scopeKey if b.rule.scope == SCOPE_GLOBAL else b.scopeKey
             # Global rules of different categories should not merge into one
@@ -254,19 +290,37 @@ class IncidentManager:
                     old = self._history.pop(0)
                     self._all.pop(old, None)
                 opened.append(inc.id)
-            else:
-                inc.touch(b)
+            elif inc.touch(b):
+                reopened.append(inc.id)
 
-        resolved: List[str] = []
+        # Recovered incidents stay listed until a person resolves them.
+        recovered: List[str] = []
         for scope, inc in list(self._open.items()):
             if scope in seen_scopes:
                 continue
             if inc.mark_clear(clear_required):
-                resolved.append(inc.id)
-                self._open.pop(scope, None)
+                recovered.append(inc.id)
 
-        return {"opened": opened, "resolved": resolved,
-                "openCount": len(self._open)}
+        return {"opened": opened, "reopened": reopened, "recovered": recovered,
+                "resolved": [], "openCount": len(self._open)}
+
+    def acknowledge(self, incident_id: str, who: str) -> Optional[Incident]:
+        inc = self._all.get(incident_id)
+        if inc is not None and inc.status != STATUS_RESOLVED:
+            inc.acknowledge(who)
+        return inc
+
+    def resolve(self, incident_id: str, who: str) -> Optional[Incident]:
+        """A person confirms the problem is fixed. If the condition is still
+        breaching, the next evaluation opens a new episode, which is the
+        honest outcome of resolving something that is not fixed."""
+        inc = self._all.get(incident_id)
+        if inc is None or inc.status == STATUS_RESOLVED:
+            return inc
+        inc.resolve(who, still_breaching=inc.status == STATUS_OPEN)
+        if self._open.get(inc.scopeKey) is inc:
+            self._open.pop(inc.scopeKey, None)
+        return inc
 
     # --- queries -----------------------------------------------------------
     def open_incidents(self) -> List[Incident]:
@@ -289,11 +343,12 @@ class IncidentManager:
         cutoff = time.time() - window_minutes * 60
         by_scope: Dict[str, List[Incident]] = {}
         for inc in self._all.values():
-            if inc.lastSeenAt < cutoff and inc.status != STATUS_OPEN:
+            if inc.lastSeenAt < cutoff and inc.status == STATUS_RESOLVED:
                 continue
             by_scope.setdefault(inc.scopeKey, []).append(inc)
 
         breaching: List[Dict[str, Any]] = []
+        recovered: List[Dict[str, Any]] = []
         resolved: List[Dict[str, Any]] = []
         total_episodes = 0
 
@@ -301,13 +356,15 @@ class IncidentManager:
             incs.sort(key=lambda i: i.startedAt)
             latest = incs[-1]
             firing = any(i.status == STATUS_OPEN for i in incs)
+            waiting = not firing and any(i.status == STATUS_RECOVERED for i in incs)
             total_episodes += len(incs)
 
             # "Breaching for" is time actually spent outside the threshold;
             # "across" is the span from the first episode to the last. They
             # differ whenever a condition has flapped, and the difference is
             # the useful part.
-            breaching_s = sum((i.resolvedAt or time.time()) - i.startedAt for i in incs)
+            breaching_s = sum((i.recoveredAt or i.resolvedAt or time.time()) - i.startedAt
+                              for i in incs)
             across_s = (latest.resolvedAt or time.time()) - incs[0].startedAt
 
             severity = max((i.severity for i in incs),
@@ -324,7 +381,12 @@ class IncidentManager:
                 "title": latest.title(),
                 "summary": latest.summary(),
                 "severity": severity,
-                "status": "BREACHING" if firing else "RESOLVED",
+                "status": "BREACHING" if firing else "RECOVERED" if waiting else "RESOLVED",
+                "acknowledgedBy": latest.acknowledgedBy,
+                "acknowledgedAt": latest.acknowledgedAt,
+                "recoveredAt": latest.recoveredAt,
+                "resolvedBy": latest.resolvedBy,
+                "traffic": self._traffic(store, latest),
                 "episodes": len(incs),
                 "service": latest.service,
                 "category": latest.category,
@@ -341,7 +403,7 @@ class IncidentManager:
                                       for i in incs for t in i.triggers.values()}),
                 "sparkline": self._sparkline(store, incs),
             }
-            (breaching if firing else resolved).append(group)
+            (breaching if firing else recovered if waiting else resolved).append(group)
 
         breaching.sort(key=lambda g: (-_SEVERITY_ORDER.get(g["severity"], 0),
                                       -g["breachingForS"]))
@@ -351,16 +413,44 @@ class IncidentManager:
             "windowMinutes": window_minutes,
             "stats": {
                 "breachingNow": len(breaching),
+                "awaitingConfirmation": len(recovered),
                 "resolvedInWindow": len(resolved),
                 "totalEpisodes": total_episodes,
                 "distinctIncidents": len(by_scope),
-                "critical": sum(1 for g in breaching + resolved
+                "critical": sum(1 for g in breaching + recovered + resolved
                                 if g["severity"] in ("CRITICAL", "HIGH")),
             },
             "breaching": breaching,
+            "recovered": recovered,
             "resolved": resolved,
             "openCount": len(self._open),
         }
+
+    @staticmethod
+    def _traffic(store, incident: Incident) -> Dict[str, Any]:
+        """Is there enough traffic right now to judge this incident?
+
+        A service that stops receiving requests stops breaching -- not because
+        it recovered but because there is nothing to measure. Flag it, so a
+        quiet service is not read as a healthy one."""
+        windows = [t.get("windowMinutes") for t in incident.triggers.values()
+                   if t.get("windowMinutes")]
+        window = min(windows) if windows else 3
+        from .rules import ruleset
+        mins = [getattr(ruleset.get(rid), "minRequests", None) for rid in incident.triggers]
+        needed = max([m for m in mins if m] or [5])
+        buckets = store.series(window_minutes=window, service=incident.service)
+        if any(str(t.get("metric", "")).startswith("checkout")
+               for t in incident.triggers.values()):
+            # A checkout rule is judged on completed checkouts, not requests.
+            unit = "checkouts"
+            count = sum((b.get("checkoutsConfirmed") or 0) + (b.get("checkoutsFailed") or 0)
+                        for b in buckets)
+        else:
+            unit = "requests"
+            count = sum(b.get("requests") or 0 for b in buckets)
+        return {"requests": count, "unit": unit, "windowMinutes": window,
+                "needed": needed, "low": count < needed}
 
     @staticmethod
     def _matching_entries(store, incident: Incident, since: float) -> int:

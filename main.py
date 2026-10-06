@@ -641,6 +641,38 @@ def incident_detail(incident_id: str) -> Dict[str, Any]:
     return data
 
 
+def _actor(request: Request) -> str:
+    """Who is acting, for the incident timeline."""
+    user = _account_user(request)
+    return (user.get("name") or user.get("email")) if user else "dashboard user"
+
+
+def _incident_action(incident_id: str, request: Request, action: str) -> Dict[str, Any]:
+    fn = incident_manager.acknowledge if action == "acknowledge" else incident_manager.resolve
+    inc = fn(incident_id, _actor(request))
+    if inc is None:
+        raise HTTPException(status_code=404, detail="no such incident")
+    if action == "resolve":
+        # Pushed like any other transition, so every open dashboard updates.
+        evaluator.recent_transitions.append(
+            {"ts": time.time(), "opened": [], "resolved": [inc.id]})
+        evaluator.recent_transitions = evaluator.recent_transitions[-40:]
+    return {"incident": inc.to_dict()}
+
+
+@app.post("/api/v1/incidents/{incident_id}/acknowledge")
+def acknowledge_incident(incident_id: str, request: Request) -> Dict[str, Any]:
+    """Someone is on it. Recorded with their name; changes nothing else."""
+    return _incident_action(incident_id, request, "acknowledge")
+
+
+@app.post("/api/v1/incidents/{incident_id}/resolve")
+def resolve_incident(incident_id: str, request: Request) -> Dict[str, Any]:
+    """A person confirms the problem is fixed. Incidents never resolve on a
+    timer: a metric going back to normal only marks them recovered."""
+    return _incident_action(incident_id, request, "resolve")
+
+
 @app.post("/api/v1/incidents/{incident_id}/analyze")
 def analyze_incident(incident_id: str,
                      refresh: bool = False) -> Dict[str, Any]:
@@ -763,6 +795,25 @@ def _notification_items(transitions) -> List[Dict[str, Any]]:
     """Incident transitions as notification rows, newest first."""
     items: List[Dict[str, Any]] = []
     for t in reversed(transitions):
+        for inc_id in t.get("reopened", []):
+            inc = incident_manager.get(inc_id)
+            if inc:
+                items.append({
+                    "ts": t["ts"], "kind": "opened", "severity": inc.severity,
+                    "title": inc.title(), "summary": "Breaching again. " + inc.summary(),
+                    "incidentId": inc.id, "service": inc.service,
+                    "episode": inc.episode,
+                })
+        for inc_id in t.get("recovered", []):
+            inc = incident_manager.get(inc_id)
+            if inc:
+                items.append({
+                    "ts": t["ts"], "kind": "recovered", "severity": inc.severity,
+                    "title": inc.title(),
+                    "summary": "Back within threshold. Waiting for someone to mark it resolved.",
+                    "incidentId": inc.id, "service": inc.service,
+                    "episode": inc.episode,
+                })
         for inc_id in t.get("opened", []):
             inc = incident_manager.get(inc_id)
             if inc:
@@ -777,7 +828,8 @@ def _notification_items(transitions) -> List[Dict[str, Any]]:
             if inc:
                 items.append({
                     "ts": t["ts"], "kind": "resolved", "severity": inc.severity,
-                    "title": inc.title(), "summary": "Stopped breaching.",
+                    "title": inc.title(),
+                    "summary": "Marked resolved by %s." % (inc.resolvedBy or "someone"),
                     "incidentId": inc.id, "service": inc.service,
                     "episode": inc.episode,
                 })

@@ -1841,15 +1841,16 @@ async function loadIncidents() {
   $("#incTiles").innerHTML = [
     linkTile({ label: "Breaching now", value: nf(st.breachingNow), valueColor: st.breachingNow ? "--err" : "--ok",
                foot: "thresholds currently crossed" }),
-    linkTile({ label: "Resolved", value: nf(st.resolvedInWindow), foot: "stopped breaching in this window" }),
-    linkTile({ label: "Episodes", value: nf(st.totalEpisodes),
-               foot: `across ${nf(st.distinctIncidents)} distinct incident${st.distinctIncidents === 1 ? "" : "s"}` }),
+    linkTile({ label: "Waiting for confirmation", value: nf(st.awaitingConfirmation || 0),
+               valueColor: st.awaitingConfirmation ? "--warn" : null, foot: "recovered, not yet marked resolved" }),
+    linkTile({ label: "Resolved", value: nf(st.resolvedInWindow), foot: "marked resolved in this window" }),
     // The backend's "critical" count includes HIGH, so the label says so.
     linkTile({ label: "High or critical", value: nf(st.critical), valueColor: st.critical ? "--err" : null,
                foot: "top two severities" }),
   ].join("");
   $("#incBreachChip").innerHTML = st.breachingNow ? chip(`${nf(st.breachingNow)} need someone`, "--err") : chip("All clear", "--ok");
   $("#incResolvedChip").innerHTML = st.resolvedInWindow ? chip(`${nf(st.resolvedInWindow)} resolved`, "--text-faint") : "";
+  $("#incRecoveredChip").innerHTML = st.awaitingConfirmation ? chip(`${nf(st.awaitingConfirmation)} to confirm`, "--warn") : "";
 
   // Say plainly which numbers are live and which are a day behind. A reader
   // who does not know the difference will trust the stale one.
@@ -1868,6 +1869,7 @@ async function loadIncidents() {
         </div></div>` : "";
 
   renderIncidentGroups("#incBreaching", d.breaching, "Nothing is breaching.");
+  renderIncidentGroups("#incRecovered", d.recovered || [], "Nothing waiting for confirmation.");
   renderIncidentGroups("#incResolved", d.resolved, "Nothing resolved in this window.");
 
   const badge = $("#incBadge");
@@ -1885,7 +1887,19 @@ function renderIncidentGroups(sel, groups, emptyMsg) {
   const rowHtml = (g, i) => {
     const spark = (g.sparkline || []).map(v =>
       `<i class="${v > 0.55 ? "hot" : ""}" style="height:${Math.max(8, v * 100)}%"></i>`).join("");
-    const when = g.status === "BREACHING" ? "just now" : ago(g.resolvedAt);
+    const when = g.status === "BREACHING" ? "just now"
+      : g.status === "RECOVERED" ? "recovered " + ago(g.recoveredAt) : ago(g.resolvedAt);
+    const t = g.traffic || {};
+    const people = [
+      g.acknowledgedBy ? `<span class="pill info"><span class="dot"></span>Acknowledged by ${esc(g.acknowledgedBy)} · ${hhmm(g.acknowledgedAt)}</span>` : "",
+      g.resolvedBy ? `<span class="pill ok"><span class="dot"></span>Resolved by ${esc(g.resolvedBy)}</span>` : "",
+      t.low && g.status !== "RESOLVED"
+        ? `<span class="pill warn" title="${nf(t.requests)} ${t.unit || "requests"} in the last ${t.windowMinutes} min; this rule needs ${t.needed} to judge"><span class="dot"></span>Low traffic: ${nf(t.requests)} ${t.unit || "requests"} in ${t.windowMinutes} min, too few to judge</span>` : "",
+    ].join("");
+    const actions = g.status === "RESOLVED" ? "" : `<div class="inc-actions">
+        ${g.acknowledgedBy ? "" : `<button class="btn" data-ack="${esc(g.primaryIncidentId)}">Acknowledge</button>`}
+        <button class="btn ${g.status === "RECOVERED" ? "primary" : ""}" data-resolve="${esc(g.primaryIncidentId)}" data-breaching="${g.status === "BREACHING"}">Mark resolved</button>
+      </div>`;
     return `<div class="inc-row ${esc(g.severity)}" data-grp="${esc(sel)}-${i}">
       <div class="inc-top">
         <div style="flex:1;min-width:240px">
@@ -1895,6 +1909,7 @@ function renderIncidentGroups(sel, groups, emptyMsg) {
             ${g.episodes > 1 ? `<span class="pill muted">${g.episodes} episodes</span>` : ""}
           </div>
           <div class="inc-sum">${esc(g.summary)}</div>
+          ${people ? `<div class="inc-people">${people}</div>` : ""}
           <div class="inc-meta">
             <span>Breaching for<strong>${durShort(g.breachingForS)}</strong></span>
             <span>Across<strong>${durShort(g.acrossS)}</strong></span>
@@ -1902,6 +1917,7 @@ function renderIncidentGroups(sel, groups, emptyMsg) {
             ${g.ruleWindowMinutes ? `<span>Rule window<strong>${g.ruleWindowMinutes}m</strong></span>` : ""}
             <span>Started<strong>${hms(g.startedAt)}</strong></span>
           </div>
+          ${actions}
         </div>
         <div class="inc-right">
           <div class="spark">${spark}</div>
@@ -1938,6 +1954,25 @@ function renderIncidentGroups(sel, groups, emptyMsg) {
     const chev = box.querySelector(`[data-exp="${CSS.escape(pid.slice(4))}"]`);
     if (chev) chev.textContent = "▴";
   });
+
+  const act = async (btn, id, what) => {
+    btn.disabled = true;
+    try {
+      const r = await fetch(`/api/v1/incidents/${encodeURIComponent(id)}/${what}`, { method: "POST" });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+      toast(what === "acknowledge" ? "Acknowledged. Your name is on the incident." : "Marked resolved.");
+    } catch (e) {
+      toast("Could not update: " + e.message);
+    }
+    await loadIncidents();
+  };
+  $$(sel + " [data-ack]").forEach(b => b.addEventListener("click", () => act(b, b.dataset.ack, "acknowledge")));
+  $$(sel + " [data-resolve]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.breaching === "true" && !confirm(
+        "This incident is still breaching. If you mark it resolved now, the next check " +
+        "will open it again as a new episode. Mark it resolved anyway?")) return;
+    act(b, b.dataset.resolve, "resolve");
+  }));
 
   $$(sel + " [data-exp]").forEach(btn => btn.addEventListener("click", async () => {
     const id = btn.dataset.exp;
@@ -2237,7 +2272,7 @@ async function showIncident(id) {
     const d = await api("/api/v1/incidents/" + id);
     head = {
       title: esc(d.title),
-      sub: `<span class="pill ${d.status === "OPEN" ? "err" : "ok"}">${esc(d.status)}</span>
+      sub: `<span class="pill ${d.status === "OPEN" ? "err" : d.status === "RECOVERED" ? "warn" : "ok"}">${esc(d.status)}</span>
             <span class="pill ${{ CRITICAL: "crit", HIGH: "err", MEDIUM: "warn" }[d.severity] || "muted"}">${esc(d.severity)}</span>
             <span class="faint">${dur(d.durationS)} · started ${hms(d.startedAt)}</span>`,
     };
@@ -2315,7 +2350,7 @@ function renderNotifList() {
     : state.notifs.map(x => `
       <div class="notif-item${x.kind === "opened" && x.ts > state.notifSeen ? " unread" : ""}" data-inc="${esc(x.incidentId)}">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span class="pill ${x.kind === "opened" ? "err" : "ok"}"><span class="dot"></span>${x.kind}</span>
+          <span class="pill ${x.kind === "opened" ? "err" : x.kind === "recovered" ? "warn" : "ok"}"><span class="dot"></span>${x.kind}</span>
           <span class="pill ${{ CRITICAL: "crit", HIGH: "err", MEDIUM: "warn" }[x.severity] || "muted"}">${esc(x.severity)}</span>
           <span class="faint" style="font-size:11.5px;margin-left:auto">${hms(x.ts)}</span>
         </div>
