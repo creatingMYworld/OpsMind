@@ -621,12 +621,16 @@ def incidents(window: int = Query(360, ge=5, le=1440)) -> Dict[str, Any]:
         root = (data["breaching"][0].get("correlation") or {}).get(
             "suspectedRootCauseService")
     data["suspectedRootCauseService"] = root
+    # The billed tier only carries a "reason" when it has no data. Once the
+    # export is populated there is none, and indexing it took this whole
+    # endpoint (and with it the Incidents and Insights pages) down.
+    billed = cost_engine.billed_status()
     data["dataSources"] = [
         {"label": "Operational telemetry", "freshness": "near real-time",
          "tier": "LIVE", "ok": True},
         {"label": "Billing", "freshness": "daily export",
-         "tier": "AUTHORITATIVE",
-         "ok": False, "note": cost_engine.billed_status()["reason"]},
+         "tier": "AUTHORITATIVE", "ok": bool(billed.get("available")),
+         "note": billed.get("reason") or "Billed cost is being read from the export."},
     ]
     return data
 
