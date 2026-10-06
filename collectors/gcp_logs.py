@@ -87,9 +87,11 @@ class GcpLogCollector:
         client = self._ensure_client()
         now = datetime.datetime.now(datetime.timezone.utc)
         if self.cursor is None:
-            # Cold start: pick up the last 10 minutes so the dashboard is not
-            # blank while waiting for new traffic.
-            since = now - datetime.timedelta(minutes=10)
+            # Cold start: read back as far as the store can hold, so a fresh
+            # instance (after a deploy, or after scaling to zero) is not blank
+            # for long windows. Polls page forward from the oldest entry, so
+            # the history fills in over the first minute rather than at once.
+            since = now - datetime.timedelta(minutes=settings.logs_backfill_minutes)
         else:
             since = self.cursor - datetime.timedelta(seconds=_CURSOR_REWIND_S)
 

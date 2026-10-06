@@ -82,6 +82,11 @@ class Settings:
         # Cloud Logging is the durable store, this is a working set.
         self.log_buffer_size: int = _env_int("LOG_BUFFER_SIZE", 5000)
         self.minute_buckets: int = _env_int("MINUTE_BUCKETS", 180)
+        # How far back a cold start reads Cloud Logging. Cloud Run scales to
+        # zero and every new instance starts empty, so this decides whether a
+        # 3-hour view right after a deploy shows 3 hours or 10 minutes.
+        # Defaults to the 3 hours the per-minute store can hold.
+        self.logs_backfill_minutes: int = _env_int("LOGS_BACKFILL_MINUTES", self.minute_buckets)
 
         # Poll cadences. See docs/ARCHITECTURE.md "three latency tiers".
         self.logs_poll_interval_s: float = _env_float("LOGS_POLL_INTERVAL_S", 4.0)
