@@ -1084,3 +1084,9 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid
 .inc-actions { display: flex; gap: 8px; margin-top: 10px; }
 .inc-actions .btn { font-size: 12.5px; padding: 6px 12px; }
 .inc-note { font-size: 12px; margin: -6px 0 10px; }
+
+/* Optimization Center: every check, flagged or not. */
+.opt-checks { margin-top: 14px; }
+.checks-head { display: flex; align-items: baseline; gap: 12px; padding: 14px 16px 6px; }
+.checks-head h3 { margin: 0; }
+.checks-table td { font-size: 12.5px; }

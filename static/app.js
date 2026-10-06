@@ -1679,6 +1679,24 @@ async function loadCost() {
   renderOptimization(recs);
 }
 
+/* Every check that ran, flagged or not, so "nothing to change" shows its
+   working instead of an empty box. */
+function renderChecks(rows, recCount) {
+  if (!rows.length) return `<div class="card"><div class="empty">No services have reported in this window yet, so there is nothing to check. Send some traffic and this fills in.</div></div>`;
+  const flagged = rows.filter(r => r.status === "flagged").length;
+  const tone = { flagged: "warn", ok: "ok", "no data": "muted" };
+  return `<div class="card flush">
+    <div class="checks-head"><h3>What we checked</h3>
+      <span class="faint">${rows.length} checks · ${flagged ? `${flagged} flagged below` : recCount ? "" : "nothing worth changing right now"}</span></div>
+    <div style="overflow-x:auto"><table class="pat-table checks-table">
+      <thead><tr><th>Check</th><th>Where</th><th>Observed</th><th>Flags when</th><th>Result</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${esc(r.check)}</td><td class="mono">${esc(svcShort(r.scope))}</td>
+        <td>${esc(r.observed)}</td><td class="faint">${esc(r.limit)}</td>
+        <td><span class="pill ${tone[r.status] || "muted"}"><span class="dot"></span>${r.status === "ok" ? "passed" : esc(r.status)}</span></td></tr>`).join("")}</tbody>
+    </table></div></div>`;
+}
+
 /* The Optimization Center: three numbers that frame the list, a written
    summary, then one card per recommendation. */
 function renderOptimization(recs) {
@@ -1700,8 +1718,9 @@ function renderOptimization(recs) {
 
   // Live refresh re-renders the list; remember which cards the reader opened.
   const opened = new Set($$("#recs details[open]").map(d => d.dataset.id));
+  $("#optChecks").innerHTML = renderChecks(recs.checks || [], list.length);
   $("#recs").innerHTML = list.length === 0
-    ? `<div class="card"><div class="empty">No recommendation applies to this window.</div></div>`
+    ? ""
     // Closed, a card is title, severity and saving; the evidence opens on click.
     : list.map(r => `<details class="card rec-card ${esc(r.severity)}" data-id="${esc(r.id)}"${opened.has(r.id) ? " open" : ""}>
         <summary>

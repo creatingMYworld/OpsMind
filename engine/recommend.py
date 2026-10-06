@@ -333,6 +333,56 @@ def generate(store, window_minutes: int = 30) -> List[Dict[str, Any]]:
                 saving_usd_month=None,
             ))
 
+    # --- 8. Failed requests are billed work ---------------------------
+    # A 5xx or 4xx response is billed exactly like a success: the request
+    # charge, plus CPU and memory for every second it took. Summed from the
+    # buffered log lines, so the figure is measured, not estimated.
+    since = time.time() - window_minutes * 60
+    page = store.logs(limit=settings.log_buffer_size, since=since)
+    failed: Dict[str, Dict[str, float]] = {}
+    for e in page["entries"]:
+        st = e.get("httpStatus") or 0
+        if st < 400:
+            continue
+        f = failed.setdefault(e.get("service") or "?", {"n": 0, "s": 0.0, "n5": 0})
+        f["n"] += 1
+        f["n5"] += 1 if st >= 500 else 0
+        f["s"] += (e.get("latencyMs") or 0) / 1000.0
+    for service, f in sorted(failed.items(), key=lambda kv: -kv[1]["s"]):
+        if f["n"] < 10:
+            continue
+        shape = settings.shape(service)
+        per_s = (shape["vcpu"] * prices["cpuPerVcpuSecond"]
+                 + shape["memoryGib"] * prices["memoryPerGibSecond"])
+        window_usd = f["s"] * per_s + f["n"] / 1_000_000.0 * prices["perMillionRequests"]
+        monthly = window_usd * scale_to_month
+        out.append(_rec(
+            "failed-request-cost",
+            "Failed requests on %s cost $%.4f/month" % (service, monthly),
+            "Fix or reject the top failing pattern on %s earlier: %d failed "
+            "responses in the window (%d server errors) still used %.1f billed "
+            "request-seconds." % (service, f["n"], f["n5"], f["s"]),
+            resource=service, observed_metric="failed responses (4xx + 5xx)",
+            observed_value=int(f["n"]), unit="", window_minutes=window_minutes,
+            rationale="Cloud Run bills a failed request the same as a served one. "
+                      "Server errors also tend to be slow (timeouts) and get "
+                      "retried, so they cost more per request than successes.",
+            action="Open Logs filtered to %s and status 5xx/4xx, fix the top "
+                   "error group, and fail fast on calls that cannot succeed."
+                   % service,
+            confidence="HIGH",
+            severity="HIGH" if f["n5"] >= 20 else "MEDIUM",
+            evidence={"failedResponses": int(f["n"]), "serverErrors": int(f["n5"]),
+                      "billedRequestSeconds": round(f["s"], 2),
+                      "vcpu": shape["vcpu"], "memoryGib": shape["memoryGib"]},
+            saving_usd_month=monthly,
+            saving_basis="%.2f request-s x (%g vCPU x $%g + %g GiB x $%g) + %d "
+                         "requests x $%g/million, x %.1f windows per month"
+                         % (f["s"], shape["vcpu"], prices["cpuPerVcpuSecond"],
+                            shape["memoryGib"], prices["memoryPerGibSecond"],
+                            f["n"], prices["perMillionRequests"], scale_to_month),
+        ))
+
     # Rank by severity, then by how much we trust the finding, then by the
     # size of the saving. Confidence matters: a HIGH-severity extrapolation we
     # are unsure about should not sit above a HIGH-confidence, quantified fix.
@@ -344,6 +394,55 @@ def generate(store, window_minutes: int = 30) -> List[Dict[str, Any]]:
         -(r["estimatedSavingUsdPerMonth"] or 0.0),
     ))
     return out
+
+
+def checks(store, recs: List[Dict[str, Any]], window_minutes: int = 30) -> List[Dict[str, Any]]:
+    """What every cost check measured, flagged or not.
+
+    An empty recommendation list should still show the analysis: which
+    services were looked at, what each check observed, and the limit it was
+    held to. "Nothing to change" is a finding only if you can see what was
+    checked."""
+    fired = {r["id"] for r in recs}
+    rows: List[Dict[str, Any]] = []
+
+    def row(check, scope, observed, limit, flagged, has_data=True):
+        rows.append({"check": check, "scope": scope, "observed": observed,
+                     "limit": limit,
+                     "status": "flagged" if flagged else "ok" if has_data else "no data"})
+
+    for s in store.service_summary(window_minutes=window_minutes):
+        svc, reqs = s["service"], s.get("requests") or 0
+        util = s.get("memoryUtilisationPct")
+        row("Memory right-sizing", svc,
+            "%.1f%% of %g GiB" % (util, settings.shape(svc)["memoryGib"]) if util is not None else "no heartbeat",
+            "under 40%, with a smaller size that still fits", "over-provisioned-memory::" + svc in fired,
+            util is not None)
+        cpu = s.get("cpuPctMax")
+        row("CPU head-room", svc, "%.1f%% peak" % cpu if cpu is not None else "no heartbeat",
+            "under 30% peak with 20+ requests", "over-provisioned-cpu::" + svc in fired, cpu is not None)
+        e4, e5 = s.get("errors4xx") or 0, s.get("errors5xx") or 0
+        row("Failed-request cost", svc,
+            "%d of %d requests failed" % (e4 + e5, reqs) if reqs else "no traffic",
+            "10+ failed responses", "failed-request-cost::" + svc in fired, reqs > 0)
+        row("Client-error waste", svc,
+            "%.1f%% 4xx" % (100.0 * e4 / reqs) if reqs else "no traffic",
+            "over 12% with 40+ requests", "client-error-waste::" + svc in fired, reqs > 0)
+
+    g = store.series(window_minutes=window_minutes)
+    started = sum(b.get("checkoutsStarted", 0) for b in g)
+    attempts = sum(b.get("paymentAttempts", 0) for b in g)
+    row("Payment retry amplification", "orders -> payments",
+        "%.2f attempts per checkout" % (attempts / float(started)) if started else "no checkouts",
+        "over 1.3 with 5+ checkouts", any(r["ruleId"] == "retry-amplification" for r in recs),
+        started > 0)
+    from . import cost as cost_engine
+    for line in cost_engine.free_tier_position(store, window_minutes=window_minutes)["lines"]:
+        pct = line.get("pctOfFreeTier")
+        row("Free-tier pressure", line["resource"],
+            "%.0f%% of monthly allowance" % pct if pct is not None else "no usage",
+            "over 60% projected", pct is not None and pct > 60.0, pct is not None)
+    return rows
 
 
 def _gcloud_mem(gib: float) -> str:

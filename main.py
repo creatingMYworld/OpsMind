@@ -951,6 +951,7 @@ def recommendations(window: int = Query(30, ge=1, le=180)) -> Dict[str, Any]:
     return {
         "windowMinutes": window,
         "recommendations": recs,
+        "checks": recommend_engine.checks(store, recs, window_minutes=window),
         "count": len(recs),
         "totalCalculatedSavingUsdPerMonth": round(
             sum(r["estimatedSavingUsdPerMonth"] for r in calculated), 4),
